@@ -3,14 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Финтрекер — Лето 2026</title>
+  <title>Финансовый Трекер</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     :root {
       --bg: #080810;
       --surface: #12121e;
-      --surface2: #1a1a2e;
       --border: rgba(255,255,255,0.07);
       --text: #e2e8f0;
       --muted: #94a3b8;
@@ -32,12 +31,47 @@
     /* ── HEADER ── */
     .header {
       background: linear-gradient(135deg, #12121e 0%, #1a0a2e 100%);
-      padding: 36px 20px 28px;
+      padding: 32px 20px 24px;
       text-align: center;
       border-bottom: 1px solid var(--border);
     }
     .header h1 { font-size: 1.5rem; font-weight: 700; color: #fff; letter-spacing: -.02em; }
-    .header p  { font-size: .875rem; color: var(--muted); margin-top: 4px; }
+
+    .period-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      margin-top: 14px;
+      flex-wrap: wrap;
+    }
+    .period-lbl { font-size: .75rem; color: var(--muted); font-weight: 500; }
+    .period-sel {
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 8px;
+      color: #fff;
+      font-family: 'Inter', sans-serif;
+      font-size: .875rem;
+      font-weight: 500;
+      padding: 6px 10px;
+      cursor: pointer;
+      outline: none;
+      transition: border-color .2s;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+    .period-sel:focus { border-color: var(--accent); }
+    .period-sel option { background: #1a1a2e; }
+    .period-arrow { color: var(--muted); font-size: .875rem; padding: 0 2px; }
+    .period-months-display {
+      font-size: .75rem;
+      color: var(--muted);
+      background: rgba(255,255,255,.05);
+      padding: 4px 10px;
+      border-radius: 99px;
+      margin-left: 4px;
+    }
 
     /* ── OVERVIEW ── */
     .overview { max-width: 700px; margin: 24px auto; padding: 0 16px; }
@@ -50,8 +84,8 @@
     .ov-row { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 16px; }
     .ov-saved { font-size: 2.5rem; font-weight: 700; color: #fff; }
     .ov-right { text-align: right; }
-    .ov-pct   { font-size: 1.25rem; font-weight: 600; color: var(--accent); }
-    .ov-of    { font-size: .875rem; color: var(--muted); margin-top: 2px; }
+    .ov-pct { font-size: 1.25rem; font-weight: 600; color: var(--accent); }
+    .ov-of  { font-size: .875rem; color: var(--muted); margin-top: 2px; }
     .bar-bg { background: rgba(255,255,255,.08); border-radius: 99px; height: 10px; overflow: hidden; }
     .bar-fill {
       height: 100%;
@@ -60,322 +94,308 @@
       transition: width .6s cubic-bezier(.4,0,.2,1);
     }
     .stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin-top: 20px; }
-    .stat {
-      background: rgba(255,255,255,.03);
-      border-radius: 12px;
-      padding: 12px;
-      text-align: center;
-    }
+    .stat { background: rgba(255,255,255,.03); border-radius: 12px; padding: 12px; text-align: center; }
     .stat-v { font-size: 1.125rem; font-weight: 600; color: #fff; }
     .stat-l { font-size: .75rem; color: var(--muted); margin-top: 2px; }
 
-    /* ── SECTIONS ── */
+    /* ── SECTION ── */
     .section { max-width: 700px; margin: 24px auto; padding: 0 16px; }
-    .sec-hdr {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 14px;
-    }
-    .sec-icon { font-size: 1.25rem; }
+    .sec-hdr { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+    .sec-icon  { font-size: 1.25rem; }
     .sec-title { font-size: 1.125rem; font-weight: 600; color: #fff; }
     .sec-badge {
       margin-left: auto;
-      font-size: .8125rem;
-      color: var(--muted);
+      font-size: .8125rem; color: var(--muted);
       background: rgba(255,255,255,.05);
-      padding: 4px 12px;
-      border-radius: 99px;
+      padding: 4px 12px; border-radius: 99px;
     }
     .btn-add-sec {
       width: 28px; height: 28px;
-      border-radius: 50%;
-      border: 1px solid var(--border);
-      background: transparent;
-      color: var(--muted);
-      font-size: 1.1rem;
-      cursor: pointer;
+      border-radius: 50%; border: 1px solid var(--border);
+      background: transparent; color: var(--muted);
+      font-size: 1.1rem; cursor: pointer;
       display: flex; align-items: center; justify-content: center;
       transition: all .2s;
     }
     .btn-add-sec:hover { background: rgba(124,58,237,.2); border-color: var(--accent); color: var(--accent); }
 
-    /* ── INCOME GRID ── */
-    .income-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; }
-    .month-card {
+    /* ── INCOME ENTRIES ── */
+    .income-card {
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 16px;
-      padding: 16px;
+      overflow: hidden;
     }
-    .month-name { font-size: .875rem; color: var(--muted); font-weight: 500; margin-bottom: 12px; }
-    .inc-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
-    .inc-ico { font-size: .875rem; width: 20px; flex-shrink: 0; }
-    .inc-inp {
-      flex: 1; min-width: 0;
-      background: rgba(255,255,255,.05);
-      border: 1px solid transparent;
+    .income-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--border);
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .income-total-wrap { display: flex; align-items: center; gap: 8px; }
+    .income-total-label { font-size: .8125rem; color: var(--muted); }
+    .income-total-val { font-size: 1.125rem; font-weight: 700; color: var(--savings); }
+    .btn-add-income {
+      background: rgba(124,58,237,.15);
+      border: 1px solid rgba(124,58,237,.3);
       border-radius: 8px;
+      color: #a78bfa;
+      cursor: pointer;
+      font-family: 'Inter', sans-serif;
+      font-size: .8125rem; font-weight: 600;
+      padding: 7px 14px;
+      transition: all .2s;
+    }
+    .btn-add-income:hover { background: rgba(124,58,237,.25); border-color: var(--accent); }
+
+    /* add form */
+    .income-add-form {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(124,58,237,.05);
+      display: none;
+    }
+    .income-add-form.open { display: block; }
+    .if-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .if-sel {
+      background: rgba(255,255,255,.06);
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 10px;
       color: #fff;
       font-family: 'Inter', sans-serif;
       font-size: .875rem;
-      padding: 6px 8px;
-      transition: all .2s;
+      padding: 9px 10px;
+      outline: none;
+      transition: border-color .2s;
+      cursor: pointer;
     }
-    .inc-inp:focus { outline: none; border-color: var(--accent); background: rgba(124,58,237,.1); }
-    .month-total { font-size: 1rem; font-weight: 600; color: var(--savings); margin-top: 10px; }
+    .if-sel:focus { border-color: var(--accent); }
+    .if-sel option { background: #1a1a2e; }
+    .if-inp {
+      background: rgba(255,255,255,.06);
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 10px;
+      color: #fff;
+      font-family: 'Inter', sans-serif;
+      font-size: .875rem;
+      padding: 9px 12px;
+      outline: none;
+      transition: border-color .2s;
+    }
+    .if-inp:focus { border-color: var(--accent); }
+    .if-inp::placeholder { color: rgba(255,255,255,.25); }
+    .if-btns { display: flex; gap: 8px; margin-top: 10px; }
+    .btn-if-save {
+      background: var(--accent); border: none; border-radius: 10px;
+      color: #fff; cursor: pointer;
+      font-family: 'Inter', sans-serif; font-size: .875rem; font-weight: 600;
+      padding: 9px 16px; transition: background .2s;
+    }
+    .btn-if-save:hover { background: #6d28d9; }
+    .btn-if-cancel {
+      background: transparent; border: 1px solid rgba(255,255,255,.1);
+      border-radius: 10px; color: var(--muted); cursor: pointer;
+      font-family: 'Inter', sans-serif; font-size: .875rem;
+      padding: 9px 16px; transition: all .2s;
+    }
+    .btn-if-cancel:hover { color: #fff; background: rgba(255,255,255,.05); }
 
-    /* ── GOAL CARD ── */
+    /* entries list */
+    .income-list { padding: 8px 12px; }
+    .income-empty {
+      text-align: center; padding: 24px 16px;
+      color: var(--muted); font-size: .875rem;
+    }
+    .income-entry {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 6px;
+      border-radius: 10px;
+      transition: background .2s;
+    }
+    .income-entry:hover { background: rgba(255,255,255,.04); }
+    .inc-month-tag {
+      font-size: .6875rem; font-weight: 600;
+      background: rgba(124,58,237,.18); color: #a78bfa;
+      padding: 3px 8px; border-radius: 6px;
+      white-space: nowrap; flex-shrink: 0; min-width: 68px; text-align: center;
+    }
+    .inc-source {
+      flex: 1; font-size: .875rem; color: var(--text);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .inc-amt { font-size: .9375rem; font-weight: 600; color: var(--savings); flex-shrink: 0; }
+
+    /* ── GOALS ── */
     .goals-list { display: flex; flex-direction: column; gap: 10px; }
     .goal-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 16px 18px;
-      transition: border-color .25s;
-      position: relative;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; padding: 16px 18px;
+      transition: border-color .25s; position: relative;
     }
     .goal-card:hover { border-color: rgba(124,58,237,.3); }
-    .goal-card.critical  { border-left: 3px solid var(--critical); }
-    .goal-card.travel    { border-left: 3px solid var(--travel); }
-    .goal-card.purchase  { border-left: 3px solid var(--purchase); }
-    .goal-card.savings   { border-left: 3px solid var(--savings); }
-    .goal-card.done      { opacity: .55; }
+    .goal-card.critical { border-left: 3px solid var(--critical); }
+    .goal-card.travel   { border-left: 3px solid var(--travel); }
+    .goal-card.purchase { border-left: 3px solid var(--purchase); }
+    .goal-card.savings  { border-left: 3px solid var(--savings); }
+    .goal-card.done     { opacity: .55; }
 
     .goal-top { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
     .goal-ico {
-      font-size: 1.25rem;
-      width: 32px; height: 32px;
+      font-size: 1.25rem; width: 32px; height: 32px;
       display: flex; align-items: center; justify-content: center;
-      border-radius: 8px;
-      background: rgba(255,255,255,.05);
-      flex-shrink: 0;
+      border-radius: 8px; background: rgba(255,255,255,.05); flex-shrink: 0;
     }
     .goal-name-wrap {
-      flex: 1; min-width: 0;
-      font-weight: 500;
-      font-size: .9375rem;
-      color: #fff;
-      cursor: pointer;
-      border-radius: 6px;
-      padding: 2px 6px;
-      transition: background .2s;
+      flex: 1; min-width: 0; font-weight: 500; font-size: .9375rem; color: #fff;
+      cursor: pointer; border-radius: 6px; padding: 2px 6px; transition: background .2s;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .goal-name-wrap:hover { background: rgba(255,255,255,.05); }
     .goal-name-input {
-      background: rgba(124,58,237,.15);
-      border: 1px solid var(--accent);
-      border-radius: 6px;
-      color: #fff;
-      font-family: 'Inter', sans-serif;
-      font-size: .9375rem;
-      font-weight: 500;
-      padding: 2px 6px;
-      width: 100%;
-      outline: none;
+      background: rgba(124,58,237,.15); border: 1px solid var(--accent);
+      border-radius: 6px; color: #fff;
+      font-family: 'Inter', sans-serif; font-size: .9375rem; font-weight: 500;
+      padding: 2px 6px; width: 100%; outline: none;
     }
     .goal-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-    .pri-badge {
-      font-size: .6875rem;
-      font-weight: 600;
-      padding: 2px 8px;
-      border-radius: 99px;
-      letter-spacing: .03em;
-    }
+    .pri-badge { font-size: .6875rem; font-weight: 600; padding: 2px 8px; border-radius: 99px; letter-spacing: .03em; }
     .pri-critical { background: rgba(239,68,68,.15); color: #f87171; }
     .pri-travel   { background: rgba(59,130,246,.15); color: #60a5fa; }
     .pri-purchase { background: rgba(168,85,247,.15); color: #c084fc; }
     .pri-savings  { background: rgba(34,197,94,.15);  color: #4ade80; }
-
     .btn-ico {
-      width: 28px; height: 28px;
-      border-radius: 8px;
-      border: none;
-      background: transparent;
-      color: var(--muted);
-      cursor: pointer;
-      font-size: .875rem;
-      display: flex; align-items: center; justify-content: center;
-      transition: all .2s;
+      width: 28px; height: 28px; border-radius: 8px; border: none;
+      background: transparent; color: var(--muted); cursor: pointer; font-size: .875rem;
+      display: flex; align-items: center; justify-content: center; transition: all .2s;
     }
     .btn-ico:hover { background: rgba(255,255,255,.08); color: #fff; }
     .btn-ico.del:hover { background: rgba(239,68,68,.15); color: #ef4444; }
 
-    /* progress */
     .goal-prog-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
     .goal-bar { flex: 1; background: rgba(255,255,255,.07); border-radius: 99px; height: 7px; overflow: hidden; }
     .goal-bar-fill { height: 100%; border-radius: 99px; transition: width .5s ease; }
     .goal-pct { font-size: .8125rem; font-weight: 600; color: var(--muted); min-width: 36px; text-align: right; }
 
-    /* amounts */
     .goal-amts { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
     .goal-saved-wrap { display: flex; align-items: center; gap: 8px; }
     .lbl { font-size: .8125rem; color: var(--muted); }
     .editable-val {
-      font-size: .875rem; font-weight: 600;
-      cursor: pointer;
-      padding: 2px 6px;
-      border-radius: 6px;
-      transition: background .2s;
+      font-size: .875rem; font-weight: 600; cursor: pointer;
+      padding: 2px 6px; border-radius: 6px; transition: background .2s;
     }
     .editable-val:hover { background: rgba(255,255,255,.07); }
     .editable-val.green { color: var(--savings); }
     .editable-val.white { color: #fff; }
     .inline-inp {
-      background: transparent;
-      border: none;
-      border-bottom: 1px solid var(--accent);
-      color: inherit;
-      font-family: 'Inter', sans-serif;
-      font-size: inherit;
-      font-weight: inherit;
-      outline: none;
-      padding: 0 2px;
-      width: 90px;
+      background: transparent; border: none; border-bottom: 1px solid var(--accent);
+      color: inherit; font-family: 'Inter', sans-serif; font-size: inherit; font-weight: inherit;
+      outline: none; padding: 0 2px; width: 90px;
     }
-
     .btn-plus {
-      background: rgba(34,197,94,.1);
-      border: 1px solid rgba(34,197,94,.2);
-      border-radius: 8px;
-      color: var(--savings);
-      cursor: pointer;
-      font-family: 'Inter', sans-serif;
-      font-size: .8125rem;
-      font-weight: 500;
-      padding: 5px 10px;
-      transition: all .2s;
+      background: rgba(34,197,94,.1); border: 1px solid rgba(34,197,94,.2);
+      border-radius: 8px; color: var(--savings); cursor: pointer;
+      font-family: 'Inter', sans-serif; font-size: .8125rem; font-weight: 500;
+      padding: 5px 10px; transition: all .2s;
     }
     .btn-plus:hover { background: rgba(34,197,94,.2); border-color: var(--savings); }
-
     .goal-remain { font-size: .75rem; color: var(--muted); margin-top: 8px; }
     .goal-remain .amt { color: #f59e0b; }
     .goal-done-label { font-size: .75rem; color: var(--savings); margin-top: 8px; }
 
     /* ── ADD GOAL FORM ── */
     .add-form {
-      background: var(--surface);
-      border: 1px dashed rgba(124,58,237,.3);
-      border-radius: 16px;
-      padding: 16px 18px;
-      display: none;
-      margin-top: 10px;
+      background: var(--surface); border: 1px dashed rgba(124,58,237,.3);
+      border-radius: 16px; padding: 16px 18px; display: none; margin-top: 10px;
     }
     .add-form.open { display: block; }
     .add-form-row { display: grid; grid-template-columns: 1fr 120px; gap: 10px; margin-bottom: 10px; }
     .f-inp {
-      background: rgba(255,255,255,.05);
-      border: 1px solid rgba(255,255,255,.1);
-      border-radius: 10px;
-      color: #fff;
-      font-family: 'Inter', sans-serif;
-      font-size: .875rem;
-      padding: 10px 12px;
-      outline: none;
-      transition: border-color .2s;
+      background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
+      border-radius: 10px; color: #fff;
+      font-family: 'Inter', sans-serif; font-size: .875rem;
+      padding: 10px 12px; outline: none; transition: border-color .2s;
     }
     .f-inp:focus { border-color: var(--accent); }
     .f-inp::placeholder { color: rgba(255,255,255,.2); }
     .add-form-btns { display: flex; gap: 8px; }
     .btn-save {
-      background: var(--accent);
-      border: none; border-radius: 10px;
-      color: #fff;
-      cursor: pointer;
-      font-family: 'Inter', sans-serif;
-      font-size: .875rem; font-weight: 600;
-      padding: 10px 16px;
-      transition: background .2s;
+      background: var(--accent); border: none; border-radius: 10px; color: #fff; cursor: pointer;
+      font-family: 'Inter', sans-serif; font-size: .875rem; font-weight: 600;
+      padding: 10px 16px; transition: background .2s;
     }
     .btn-save:hover { background: #6d28d9; }
     .btn-cl {
-      background: transparent;
-      border: 1px solid rgba(255,255,255,.1);
-      border-radius: 10px;
-      color: var(--muted);
-      cursor: pointer;
-      font-family: 'Inter', sans-serif;
-      font-size: .875rem;
-      padding: 10px 16px;
-      transition: all .2s;
+      background: transparent; border: 1px solid rgba(255,255,255,.1); border-radius: 10px;
+      color: var(--muted); cursor: pointer; font-family: 'Inter', sans-serif; font-size: .875rem;
+      padding: 10px 16px; transition: all .2s;
     }
     .btn-cl:hover { color: #fff; background: rgba(255,255,255,.05); }
 
     /* ── MODAL ── */
     .modal-bg {
-      position: fixed; inset: 0;
-      background: rgba(0,0,0,.72);
+      position: fixed; inset: 0; background: rgba(0,0,0,.72);
       display: flex; align-items: center; justify-content: center;
-      z-index: 200;
-      backdrop-filter: blur(6px);
-      opacity: 0; pointer-events: none;
-      transition: opacity .2s;
+      z-index: 200; backdrop-filter: blur(6px);
+      opacity: 0; pointer-events: none; transition: opacity .2s;
     }
     .modal-bg.open { opacity: 1; pointer-events: all; }
     .modal {
-      background: #1a1a2e;
-      border: 1px solid rgba(255,255,255,.1);
-      border-radius: 20px;
-      padding: 28px;
+      background: #1a1a2e; border: 1px solid rgba(255,255,255,.1);
+      border-radius: 20px; padding: 28px;
       width: 340px; max-width: 90vw;
-      transform: translateY(20px);
-      transition: transform .2s;
+      transform: translateY(20px); transition: transform .2s;
     }
     .modal-bg.open .modal { transform: translateY(0); }
     .modal-title { font-size: 1.125rem; font-weight: 600; margin-bottom: 6px; }
     .modal-sub   { font-size: .875rem; color: var(--muted); margin-bottom: 20px; }
     .modal-inp {
-      width: 100%;
-      background: rgba(255,255,255,.05);
-      border: 1px solid rgba(255,255,255,.1);
-      border-radius: 12px;
-      color: #fff;
-      font-family: 'Inter', sans-serif;
-      font-size: 1.375rem; font-weight: 600;
-      padding: 14px 16px;
-      outline: none;
-      transition: border-color .2s;
-      margin-bottom: 16px;
+      width: 100%; background: rgba(255,255,255,.05);
+      border: 1px solid rgba(255,255,255,.1); border-radius: 12px; color: #fff;
+      font-family: 'Inter', sans-serif; font-size: 1.375rem; font-weight: 600;
+      padding: 14px 16px; outline: none; transition: border-color .2s; margin-bottom: 16px;
     }
     .modal-inp:focus { border-color: var(--accent); }
     .modal-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .btn-modal-cancel {
-      background: transparent;
-      border: 1px solid rgba(255,255,255,.1);
-      border-radius: 12px;
-      color: var(--muted);
-      cursor: pointer;
-      font-family: 'Inter', sans-serif; font-size: .9375rem; font-weight: 500;
-      padding: 12px; transition: all .2s;
+      background: transparent; border: 1px solid rgba(255,255,255,.1); border-radius: 12px;
+      color: var(--muted); cursor: pointer; font-family: 'Inter', sans-serif;
+      font-size: .9375rem; font-weight: 500; padding: 12px; transition: all .2s;
     }
     .btn-modal-cancel:hover { color: #fff; background: rgba(255,255,255,.05); }
     .btn-modal-ok {
-      background: var(--accent);
-      border: none; border-radius: 12px;
-      color: #fff; cursor: pointer;
+      background: var(--accent); border: none; border-radius: 12px; color: #fff; cursor: pointer;
       font-family: 'Inter', sans-serif; font-size: .9375rem; font-weight: 600;
       padding: 12px; transition: background .2s;
     }
     .btn-modal-ok:hover { background: #6d28d9; }
 
-    /* ── FOOTER ── */
     .footer { text-align: center; font-size: .75rem; color: rgba(255,255,255,.18); padding: 24px 16px; }
 
-    /* ── RESPONSIVE ── */
     @media (max-width: 520px) {
-      .income-grid { grid-template-columns: 1fr; }
       .stats { grid-template-columns: repeat(2,1fr); }
       .ov-saved { font-size: 2rem; }
       .add-form-row { grid-template-columns: 1fr; }
+      .if-row { flex-direction: column; }
     }
   </style>
 </head>
 <body>
 
+<!-- HEADER -->
 <div class="header">
   <h1>💸 Финансовый Трекер</h1>
-  <p>Лето 2026 · Июнь — Август</p>
+  <div class="period-row">
+    <span class="period-lbl">с</span>
+    <select class="period-sel" id="p-sm" onchange="updatePeriod()"></select>
+    <select class="period-sel" id="p-sy" onchange="updatePeriod()"></select>
+    <span class="period-arrow">→</span>
+    <select class="period-sel" id="p-em" onchange="updatePeriod()"></select>
+    <select class="period-sel" id="p-ey" onchange="updatePeriod()"></select>
+    <span class="period-months-display" id="p-months-lbl"></span>
+  </div>
 </div>
 
 <!-- OVERVIEW -->
@@ -393,9 +413,9 @@
     </div>
     <div class="bar-bg"><div class="bar-fill" id="main-bar" style="width:0%"></div></div>
     <div class="stats">
-      <div class="stat"><div class="stat-v" id="s-income">€0</div><div class="stat-l">Доход за лето</div></div>
+      <div class="stat"><div class="stat-v" id="s-income">€0</div><div class="stat-l">Доходы за период</div></div>
       <div class="stat"><div class="stat-v" id="s-remain">€0</div><div class="stat-l">Осталось</div></div>
-      <div class="stat"><div class="stat-v" id="s-month">€0</div><div class="stat-l">Нужно в месяц</div></div>
+      <div class="stat"><div class="stat-v" id="s-month">€0</div><div class="stat-l" id="s-month-lbl">В месяц</div></div>
     </div>
   </div>
 </div>
@@ -405,9 +425,33 @@
   <div class="sec-hdr">
     <span class="sec-icon">💼</span>
     <span class="sec-title">Доход</span>
-    <span class="sec-badge" id="income-badge">€0 за лето</span>
   </div>
-  <div class="income-grid" id="income-grid"></div>
+  <div class="income-card">
+    <div class="income-header">
+      <div class="income-total-wrap">
+        <span class="income-total-label">Итого за период:</span>
+        <span class="income-total-val" id="income-total-val">€0</span>
+      </div>
+      <button class="btn-add-income" onclick="toggleIncomeForm()">+ Добавить доход</button>
+    </div>
+
+    <div class="income-add-form" id="income-form">
+      <div class="if-row">
+        <select class="if-sel" id="if-m" style="flex-shrink:0"></select>
+        <select class="if-sel" id="if-y" style="flex-shrink:0"></select>
+        <input  class="if-inp" id="if-s" placeholder="Источник (барбер, фриланс...)" style="flex:1;min-width:140px" />
+        <input  class="if-inp" id="if-a" type="number" min="0" placeholder="€ Сумма" style="width:110px;flex-shrink:0" />
+      </div>
+      <div class="if-btns">
+        <button class="btn-if-save" onclick="addIncomeEntry()">Добавить</button>
+        <button class="btn-if-cancel" onclick="toggleIncomeForm()">Отмена</button>
+      </div>
+    </div>
+
+    <div class="income-list" id="income-list">
+      <div class="income-empty">Нет записей. Нажми «+ Добавить доход»</div>
+    </div>
+  </div>
 </div>
 
 <!-- CRITICAL -->
@@ -500,7 +544,7 @@
 <div class="modal-bg" id="modal" onclick="onModalBgClick(event)">
   <div class="modal">
     <div class="modal-title" id="modal-name">Добавить деньги</div>
-    <div class="modal-sub">Сколько € добавить?</div>
+    <div class="modal-sub">Сколько € добавить к цели?</div>
     <input class="modal-inp" id="modal-amt" type="number" placeholder="0" min="0" />
     <div class="modal-btns">
       <button class="btn-modal-cancel" onclick="closeModal()">Отмена</button>
@@ -510,40 +554,42 @@
 </div>
 
 <script>
-// ─────────────────────────────────────────────
-//  STATE
-// ─────────────────────────────────────────────
-const STORAGE_KEY = 'fintracker_2026_v2';
-const MONTHS = ['june','july','august'];
-const MONTH_RU = { june:'Июнь', july:'Июль', august:'Август' };
+// ──────────────────────────────────────────────
+//  CONSTANTS
+// ──────────────────────────────────────────────
+const STORAGE_KEY = 'fintracker_v3';
+const MONTHS_FULL  = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+const MONTHS_SHORT = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
 const CAT_COLOR = { critical:'#ef4444', travel:'#3b82f6', purchase:'#a855f7', savings:'#22c55e' };
 const CAT_ICON  = { critical:'🎯', travel:'✈️', purchase:'🛍️', savings:'💰' };
 const CAT_PRI   = { critical:'pri-critical', travel:'pri-travel', purchase:'pri-purchase', savings:'pri-savings' };
+const YEARS     = [2025,2026,2027,2028,2029,2030];
 
 const DEFAULTS = {
-  nextId: 14,
-  income: {
-    june:   { online: 0, barber: 0 },
-    july:   { online: 0, barber: 0 },
-    august: { online: 0, barber: 0 }
-  },
+  period: { startMonth:6, startYear:2026, endMonth:8, endYear:2026 },
+  income: [],
+  nextIncomeId: 1,
   goals: [
-    { id:1,  cat:'critical', icon:'🎓', name:'1-й семестр учёбы',      target:1500, saved:0 },
-    { id:2,  cat:'critical', icon:'🎓', name:'2-й семестр учёбы',      target:1500, saved:0 },
-    { id:3,  cat:'critical', icon:'🏠', name:'Аренда квартиры (год)',  target:2000, saved:0 },
-    { id:4,  cat:'travel',   icon:'🇰🇿', name:'Казахстан (зима)',       target:600,  saved:0 },
-    { id:5,  cat:'travel',   icon:'🇮🇹', name:'Италия (лето)',          target:500,  saved:0 },
-    { id:6,  cat:'travel',   icon:'🕌', name:'Стамбул',                target:450,  saved:0 },
-    { id:7,  cat:'purchase', icon:'📷', name:'DJI Osmo Pocket 3',     target:350,  saved:0 },
-    { id:8,  cat:'purchase', icon:'🎸', name:'Гитара',                 target:200,  saved:0 },
-    { id:9,  cat:'purchase', icon:'🖥️', name:'Монитор',               target:300,  saved:0 },
-    { id:10, cat:'purchase', icon:'⌨️', name:'Клавиатура',            target:150,  saved:0 },
-    { id:11, cat:'purchase', icon:'🎙️', name:'Микрофон',              target:100,  saved:0 },
-    { id:12, cat:'purchase', icon:'🕶️', name:'Очки Ray-Ban',          target:200,  saved:0 },
-    { id:13, cat:'savings',  icon:'💰', name:'Финансовая подушка',     target:1000, saved:0 }
-  ]
+    { id:1,  cat:'critical', icon:'🎓', name:'1-й семестр учёбы',     target:1500, saved:0 },
+    { id:2,  cat:'critical', icon:'🎓', name:'2-й семестр учёбы',     target:1500, saved:0 },
+    { id:3,  cat:'critical', icon:'🏠', name:'Аренда квартиры (год)', target:2000, saved:0 },
+    { id:4,  cat:'travel',   icon:'🇰🇿', name:'Казахстан (зима)',      target:600,  saved:0 },
+    { id:5,  cat:'travel',   icon:'🇮🇹', name:'Италия (лето)',         target:500,  saved:0 },
+    { id:6,  cat:'travel',   icon:'🕌', name:'Стамбул',               target:450,  saved:0 },
+    { id:7,  cat:'purchase', icon:'📷', name:'DJI Osmo Pocket 3',    target:350,  saved:0 },
+    { id:8,  cat:'purchase', icon:'🎸', name:'Гитара',                target:200,  saved:0 },
+    { id:9,  cat:'purchase', icon:'🖥️', name:'Монитор',              target:300,  saved:0 },
+    { id:10, cat:'purchase', icon:'⌨️', name:'Клавиатура',           target:150,  saved:0 },
+    { id:11, cat:'purchase', icon:'🎙️', name:'Микрофон',             target:100,  saved:0 },
+    { id:12, cat:'purchase', icon:'🕶️', name:'Очки Ray-Ban',         target:200,  saved:0 },
+    { id:13, cat:'savings',  icon:'💰', name:'Финансовая подушка',    target:1000, saved:0 }
+  ],
+  nextId: 14
 };
 
+// ──────────────────────────────────────────────
+//  STATE
+// ──────────────────────────────────────────────
 let S = loadState();
 let activeModalId = null;
 
@@ -554,17 +600,97 @@ function loadState() {
   } catch(_) {}
   return JSON.parse(JSON.stringify(DEFAULTS));
 }
-
 function persist() {
   S.lastSaved = new Date().toISOString();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(S));
   updateFooter();
 }
 
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
+//  PERIOD HELPERS
+// ──────────────────────────────────────────────
+function totalMonths() {
+  const s = S.period.startYear * 12 + (S.period.startMonth - 1);
+  const e = S.period.endYear   * 12 + (S.period.endMonth   - 1);
+  return Math.max(1, e - s + 1);
+}
+
+function initPeriodSelects() {
+  const ids = ['p-sm','p-em'];
+  ids.forEach(id => {
+    const sel = document.getElementById(id);
+    MONTHS_FULL.forEach((m, i) => {
+      const opt = document.createElement('option');
+      opt.value = i + 1;
+      opt.textContent = m;
+      sel.appendChild(opt);
+    });
+  });
+  ['p-sy','p-ey'].forEach(id => {
+    const sel = document.getElementById(id);
+    YEARS.forEach(y => {
+      const opt = document.createElement('option');
+      opt.value = y;
+      opt.textContent = y;
+      sel.appendChild(opt);
+    });
+  });
+  document.getElementById('p-sm').value = S.period.startMonth;
+  document.getElementById('p-sy').value = S.period.startYear;
+  document.getElementById('p-em').value = S.period.endMonth;
+  document.getElementById('p-ey').value = S.period.endYear;
+  updatePeriodLabel();
+}
+
+function initIncomeSelects() {
+  const mSel = document.getElementById('if-m');
+  const ySel = document.getElementById('if-y');
+  MONTHS_FULL.forEach((m, i) => {
+    const opt = document.createElement('option');
+    opt.value = i + 1;
+    opt.textContent = m;
+    mSel.appendChild(opt);
+  });
+  YEARS.forEach(y => {
+    const opt = document.createElement('option');
+    opt.value = y;
+    opt.textContent = y;
+    ySel.appendChild(opt);
+  });
+  mSel.value = S.period.startMonth;
+  ySel.value = S.period.startYear;
+}
+
+function updatePeriodLabel() {
+  const n = totalMonths();
+  document.getElementById('p-months-lbl').textContent = `${n} мес.`;
+}
+
+function updatePeriod() {
+  S.period.startMonth = parseInt(document.getElementById('p-sm').value);
+  S.period.startYear  = parseInt(document.getElementById('p-sy').value);
+  S.period.endMonth   = parseInt(document.getElementById('p-em').value);
+  S.period.endYear    = parseInt(document.getElementById('p-ey').value);
+
+  const s = S.period.startYear * 12 + S.period.startMonth;
+  const e = S.period.endYear   * 12 + S.period.endMonth;
+  if (e < s) {
+    S.period.endMonth = S.period.startMonth;
+    S.period.endYear  = S.period.startYear;
+    document.getElementById('p-em').value = S.period.endMonth;
+    document.getElementById('p-ey').value = S.period.endYear;
+  }
+  updatePeriodLabel();
+  persist();
+  recalc();
+}
+
+// ──────────────────────────────────────────────
 //  RENDER
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
 function render() {
+  initPeriodSelects();
+  initIncomeSelects();
   renderIncome();
   ['critical','travel','purchase','savings'].forEach(renderCat);
   recalc();
@@ -572,41 +698,41 @@ function render() {
 }
 
 function renderIncome() {
-  document.getElementById('income-grid').innerHTML = MONTHS.map(m => {
-    const d = S.income[m];
-    const tot = (d.online||0) + (d.barber||0);
-    return `<div class="month-card">
-      <div class="month-name">${MONTH_RU[m]}</div>
-      <div class="inc-row">
-        <span class="inc-ico">💻</span>
-        <input class="inc-inp" type="number" min="0" placeholder="Онлайн €"
-          value="${d.online||''}" oninput="setIncome('${m}','online',this.value)" />
-      </div>
-      <div class="inc-row">
-        <span class="inc-ico">✂️</span>
-        <input class="inc-inp" type="number" min="0" placeholder="Барбер €"
-          value="${d.barber||''}" oninput="setIncome('${m}','barber',this.value)" />
-      </div>
-      <div class="month-total">€${fmt(tot)}</div>
-    </div>`;
-  }).join('');
+  const entries = [...S.income].sort((a,b) => (a.year*12+a.month) - (b.year*12+b.month));
+  const total   = S.income.reduce((s,e) => s + e.amount, 0);
+
+  document.getElementById('income-total-val').textContent = `€${fmt(total)}`;
+
+  const list = document.getElementById('income-list');
+  if (entries.length === 0) {
+    list.innerHTML = `<div class="income-empty">Нет записей. Нажми «+ Добавить доход»</div>`;
+    return;
+  }
+  list.innerHTML = entries.map(e => `
+    <div class="income-entry">
+      <span class="inc-month-tag">${MONTHS_SHORT[e.month-1]} ${e.year}</span>
+      <span class="inc-source">${esc(e.source)}</span>
+      <span class="inc-amt">€${fmt(e.amount)}</span>
+      <button class="btn-ico del" onclick="removeIncome(${e.id})" title="Удалить">✕</button>
+    </div>
+  `).join('');
 }
 
 function renderCat(cat) {
   const goals = S.goals.filter(g => g.cat === cat);
-  const color = CAT_COLOR[cat];
-  document.getElementById(`list-${cat}`).innerHTML = goals.map((g, idx) => {
+  const color  = CAT_COLOR[cat];
+  document.getElementById(`list-${cat}`).innerHTML = goals.map(g => {
     const pct  = g.target > 0 ? Math.min(100, Math.round(g.saved / g.target * 100)) : 0;
     const done = pct >= 100;
     const rem  = Math.max(0, g.target - g.saved);
-    const priNum = S.goals.indexOf(g) + 1;
+    const num  = S.goals.indexOf(g) + 1;
     return `
     <div class="goal-card ${cat}${done?' done':''}" id="gc-${g.id}">
       <div class="goal-top">
         <div class="goal-ico">${g.icon}</div>
         <div class="goal-name-wrap" id="gn-${g.id}" onclick="editName(${g.id})">${esc(g.name)}</div>
         <div class="goal-actions">
-          <span class="pri-badge ${CAT_PRI[cat]}">#${priNum}</span>
+          <span class="pri-badge ${CAT_PRI[cat]}">#${num}</span>
           <button class="btn-ico del" onclick="delGoal(${g.id})" title="Удалить">✕</button>
         </div>
       </div>
@@ -626,18 +752,18 @@ function renderCat(cat) {
       </div>
       ${done
         ? `<div class="goal-done-label">✓ Цель достигнута!</div>`
-        : `<div class="goal-remain">Осталось: <span class="amt">€${fmt(rem)}</span></div>`
-      }
+        : `<div class="goal-remain">Осталось: <span class="amt">€${fmt(rem)}</span></div>`}
     </div>`;
   }).join('');
 }
 
 function recalc() {
-  const allSaved  = S.goals.reduce((s,g)=>s+(g.saved||0),0);
-  const allTarget = S.goals.reduce((s,g)=>s+(g.target||0),0);
-  const pct = allTarget>0 ? Math.round(allSaved/allTarget*100) : 0;
-  const income = MONTHS.reduce((s,m)=>s+(S.income[m].online||0)+(S.income[m].barber||0),0);
-  const remain = Math.max(0, allTarget - allSaved);
+  const allSaved  = S.goals.reduce((s,g) => s + (g.saved||0), 0);
+  const allTarget = S.goals.reduce((s,g) => s + (g.target||0), 0);
+  const pct       = allTarget > 0 ? Math.round(allSaved / allTarget * 100) : 0;
+  const income    = S.income.reduce((s,e) => s + e.amount, 0);
+  const remain    = Math.max(0, allTarget - allSaved);
+  const months    = totalMonths();
 
   document.getElementById('ov-saved').textContent  = `€${fmt(allSaved)}`;
   document.getElementById('ov-pct').textContent    = `${pct}%`;
@@ -645,42 +771,60 @@ function recalc() {
   document.getElementById('main-bar').style.width  = `${pct}%`;
   document.getElementById('s-income').textContent  = `€${fmt(income)}`;
   document.getElementById('s-remain').textContent  = `€${fmt(remain)}`;
-  document.getElementById('s-month').textContent   = `€${fmt(Math.round(remain/3))}`;
-  document.getElementById('income-badge').textContent = `€${fmt(income)} за лето`;
+  document.getElementById('s-month').textContent   = `€${fmt(Math.round(remain / months))}`;
+  document.getElementById('s-month-lbl').textContent = `В месяц (${months} мес.)`;
 
   ['critical','travel','purchase','savings'].forEach(cat => {
-    const gs = S.goals.filter(g=>g.cat===cat);
-    const sv = gs.reduce((s,g)=>s+(g.saved||0),0);
-    const tg = gs.reduce((s,g)=>s+(g.target||0),0);
+    const gs = S.goals.filter(g => g.cat === cat);
+    const sv = gs.reduce((s,g) => s + (g.saved||0), 0);
+    const tg = gs.reduce((s,g) => s + (g.target||0), 0);
     document.getElementById(`badge-${cat}`).textContent = `€${fmt(sv)} / €${fmt(tg)}`;
   });
 }
 
 function updateFooter() {
-  const el = document.getElementById('footer');
   if (S.lastSaved) {
-    el.textContent = `Сохранено: ${new Date(S.lastSaved).toLocaleString('ru-RU')}`;
+    document.getElementById('footer').textContent =
+      `Сохранено: ${new Date(S.lastSaved).toLocaleString('ru-RU')}`;
   }
 }
 
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
 //  INCOME
-// ─────────────────────────────────────────────
-function setIncome(month, type, val) {
-  S.income[month][type] = parseFloat(val)||0;
-  persist();
-  recalc();
-  const tots = document.querySelectorAll('.month-total');
-  MONTHS.forEach((m,i) => {
-    tots[i].textContent = `€${fmt((S.income[m].online||0)+(S.income[m].barber||0))}`;
-  });
+// ──────────────────────────────────────────────
+function toggleIncomeForm() {
+  const f = document.getElementById('income-form');
+  const open = f.classList.toggle('open');
+  if (open) document.getElementById('if-s').focus();
 }
 
-// ─────────────────────────────────────────────
+function addIncomeEntry() {
+  const month  = parseInt(document.getElementById('if-m').value);
+  const year   = parseInt(document.getElementById('if-y').value);
+  const source = document.getElementById('if-s').value.trim();
+  const amount = parseFloat(document.getElementById('if-a').value) || 0;
+
+  if (!source) { document.getElementById('if-s').focus(); return; }
+  if (amount <= 0) { document.getElementById('if-a').focus(); return; }
+
+  S.income.push({ id: S.nextIncomeId++, month, year, source, amount });
+  document.getElementById('if-s').value = '';
+  document.getElementById('if-a').value = '';
+  persist();
+  renderIncome();
+  recalc();
+}
+
+function removeIncome(id) {
+  S.income = S.income.filter(e => e.id !== id);
+  persist(); renderIncome(); recalc();
+}
+
+// ──────────────────────────────────────────────
 //  EDIT INLINE
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
 function editName(id) {
-  const g = S.goals.find(x=>x.id===id);
+  const g = S.goals.find(x => x.id === id);
   if (!g) return;
   const el = document.getElementById(`gn-${id}`);
   el.innerHTML = `<input class="goal-name-input" value="${escAttr(g.name)}"
@@ -690,12 +834,12 @@ function editName(id) {
   inp.focus(); inp.select();
 }
 function saveName(id, v) {
-  const g = S.goals.find(x=>x.id===id);
-  if (g) { g.name=(v.trim()||g.name); persist(); renderCat(g.cat); recalc(); }
+  const g = S.goals.find(x => x.id === id);
+  if (g) { g.name = v.trim() || g.name; persist(); renderCat(g.cat); recalc(); }
 }
 
 function editTarget(id) {
-  const g = S.goals.find(x=>x.id===id);
+  const g = S.goals.find(x => x.id === id);
   if (!g) return;
   const el = document.querySelector(`#gc-${id} .editable-val.white`);
   el.innerHTML = `<input class="inline-inp" type="number" value="${g.target}"
@@ -705,12 +849,12 @@ function editTarget(id) {
   inp.focus(); inp.select();
 }
 function saveTarget(id, v) {
-  const g = S.goals.find(x=>x.id===id);
-  if (g) { g.target=Math.max(0,parseFloat(v)||0); persist(); renderCat(g.cat); recalc(); }
+  const g = S.goals.find(x => x.id === id);
+  if (g) { g.target = Math.max(0, parseFloat(v)||0); persist(); renderCat(g.cat); recalc(); }
 }
 
 function editSaved(id) {
-  const g = S.goals.find(x=>x.id===id);
+  const g = S.goals.find(x => x.id === id);
   if (!g) return;
   const el = document.querySelector(`#gc-${id} .editable-val.green`);
   el.innerHTML = `<input class="inline-inp" type="number" value="${g.saved}"
@@ -720,21 +864,21 @@ function editSaved(id) {
   inp.focus(); inp.select();
 }
 function saveSaved(id, v) {
-  const g = S.goals.find(x=>x.id===id);
-  if (g) { g.saved=Math.max(0,parseFloat(v)||0); persist(); renderCat(g.cat); recalc(); }
+  const g = S.goals.find(x => x.id === id);
+  if (g) { g.saved = Math.max(0, parseFloat(v)||0); persist(); renderCat(g.cat); recalc(); }
 }
 
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
 //  MODAL — ADD MONEY
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
 function openModal(id) {
-  const g = S.goals.find(x=>x.id===id);
+  const g = S.goals.find(x => x.id === id);
   if (!g) return;
   activeModalId = id;
   document.getElementById('modal-name').textContent = g.name;
   document.getElementById('modal-amt').value = '';
   document.getElementById('modal').classList.add('open');
-  setTimeout(()=>document.getElementById('modal-amt').focus(), 80);
+  setTimeout(() => document.getElementById('modal-amt').focus(), 80);
 }
 function closeModal() {
   document.getElementById('modal').classList.remove('open');
@@ -744,67 +888,73 @@ function onModalBgClick(e) {
   if (e.target === document.getElementById('modal')) closeModal();
 }
 function confirmModal() {
-  const g = S.goals.find(x=>x.id===activeModalId);
+  const g = S.goals.find(x => x.id === activeModalId);
   if (!g) return closeModal();
-  const amt = parseFloat(document.getElementById('modal-amt').value)||0;
-  if (amt > 0) { g.saved=(g.saved||0)+amt; persist(); renderCat(g.cat); recalc(); }
+  const amt = parseFloat(document.getElementById('modal-amt').value) || 0;
+  if (amt > 0) { g.saved = (g.saved||0) + amt; persist(); renderCat(g.cat); recalc(); }
   closeModal();
 }
-document.getElementById('modal-amt').addEventListener('keydown', e=>{
-  if (e.key==='Enter') confirmModal();
+document.getElementById('modal-amt').addEventListener('keydown', e => {
+  if (e.key === 'Enter') confirmModal();
 });
 
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
 //  DELETE GOAL
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
 function delGoal(id) {
-  const g = S.goals.find(x=>x.id===id);
+  const g = S.goals.find(x => x.id === id);
   if (!g || !confirm(`Удалить «${g.name}»?`)) return;
   const cat = g.cat;
-  S.goals = S.goals.filter(x=>x.id!==id);
+  S.goals = S.goals.filter(x => x.id !== id);
   persist(); renderCat(cat); recalc();
 }
 
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
 //  ADD GOAL FORM
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
 function toggleAddForm(cat) {
   const f = document.getElementById(`form-${cat}`);
   const open = f.classList.toggle('open');
   if (open) document.getElementById(`fn-${cat}`).focus();
-  else { document.getElementById(`fn-${cat}`).value=''; document.getElementById(`ft-${cat}`).value=''; }
+  else {
+    document.getElementById(`fn-${cat}`).value = '';
+    document.getElementById(`ft-${cat}`).value = '';
+  }
 }
 function saveGoal(cat) {
-  const name = document.getElementById(`fn-${cat}`).value.trim();
-  const target = parseFloat(document.getElementById(`ft-${cat}`).value)||0;
+  const name   = document.getElementById(`fn-${cat}`).value.trim();
+  const target = parseFloat(document.getElementById(`ft-${cat}`).value) || 0;
   if (!name) { document.getElementById(`fn-${cat}`).focus(); return; }
   S.goals.push({ id: S.nextId++, cat, icon: CAT_ICON[cat], name, target, saved: 0 });
   persist(); toggleAddForm(cat); renderCat(cat); recalc();
 }
-// Enter in add form
-['critical','travel','purchase','savings'].forEach(cat=>{
-  document.getElementById(`ft-${cat}`).addEventListener('keydown',e=>{
-    if(e.key==='Enter') saveGoal(cat);
+['critical','travel','purchase','savings'].forEach(cat => {
+  document.getElementById(`ft-${cat}`).addEventListener('keydown', e => {
+    if (e.key === 'Enter') saveGoal(cat);
   });
-  document.getElementById(`fn-${cat}`).addEventListener('keydown',e=>{
-    if(e.key==='Enter') document.getElementById(`ft-${cat}`).focus();
+  document.getElementById(`fn-${cat}`).addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById(`ft-${cat}`).focus();
   });
 });
+document.getElementById('if-a').addEventListener('keydown', e => {
+  if (e.key === 'Enter') addIncomeEntry();
+});
+document.getElementById('if-s').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('if-a').focus();
+});
 
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
 //  UTILS
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
 function fmt(n) { return Math.round(n).toLocaleString('ru-RU'); }
 function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
-function escAttr(s) {
-  return String(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-}
+function escAttr(s) { return String(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
 //  INIT
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
 render();
 </script>
 </body>

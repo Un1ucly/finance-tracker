@@ -372,7 +372,19 @@
     }
     .btn-modal-ok:hover { background: #6d28d9; }
 
-    .footer { text-align: center; font-size: .75rem; color: rgba(255,255,255,.18); padding: 24px 16px; }
+    .footer {
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      font-size: .75rem; color: rgba(255,255,255,.25); padding: 24px 16px;
+    }
+    .sync-dot {
+      width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+      background: var(--savings);
+      transition: background .3s;
+    }
+    .sync-dot.syncing { background: #f59e0b; animation: pulse .8s infinite; }
+    .sync-dot.offline { background: #ef4444; }
+    .sync-dot.loading { background: #64748b; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 
     @media (max-width: 520px) {
       .stats { grid-template-columns: repeat(2,1fr); }
@@ -538,7 +550,10 @@
   </div>
 </div>
 
-<div class="footer" id="footer"></div>
+<div class="footer">
+  <div class="sync-dot loading" id="sync-dot"></div>
+  <span id="footer">Загрузка...</span>
+</div>
 
 <!-- ADD MONEY MODAL -->
 <div class="modal-bg" id="modal" onclick="onModalBgClick(event)">
@@ -588,22 +603,77 @@ const DEFAULTS = {
 };
 
 // ──────────────────────────────────────────────
-//  STATE
+//  STATE + SYNC
 // ──────────────────────────────────────────────
-let S = loadState();
+let S = JSON.parse(JSON.stringify(DEFAULTS));
 let activeModalId = null;
+let saveTimer = null;
+let isSynced = false;
 
-function loadState() {
+function loadFromLocal() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) return JSON.parse(raw);
   } catch(_) {}
-  return JSON.parse(JSON.stringify(DEFAULTS));
+  return null;
 }
+
+async function loadFromServer() {
+  try {
+    const res = await fetch('/api/state');
+    if (res.ok) return await res.json();
+  } catch(_) {}
+  return null;
+}
+
+async function saveToServer() {
+  setSyncStatus('syncing');
+  try {
+    const res = await fetch('/api/state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(S)
+    });
+    const data = await res.json();
+    if (data.ok) setSyncStatus('synced');
+    else setSyncStatus('offline');
+  } catch(_) {
+    setSyncStatus('offline');
+  }
+}
+
 function persist() {
   S.lastSaved = new Date().toISOString();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(S));
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveToServer, 800);
   updateFooter();
+}
+
+function setSyncStatus(status) {
+  const dot  = document.getElementById('sync-dot');
+  const foot = document.getElementById('footer');
+  dot.className = 'sync-dot';
+  if (status === 'syncing') {
+    dot.classList.add('syncing');
+    foot.textContent = 'Сохранение...';
+  } else if (status === 'synced') {
+    isSynced = true;
+    foot.textContent = `Синхронизировано · ${new Date(S.lastSaved).toLocaleString('ru-RU')}`;
+  } else if (status === 'offline') {
+    dot.classList.add('offline');
+    foot.textContent = 'Офлайн · данные сохранены локально';
+  } else if (status === 'loading') {
+    dot.classList.add('loading');
+    foot.textContent = 'Загрузка...';
+  }
+}
+
+function updateFooter() {
+  if (isSynced && S.lastSaved) {
+    document.getElementById('footer').textContent =
+      `Синхронизировано · ${new Date(S.lastSaved).toLocaleString('ru-RU')}`;
+  }
 }
 
 // ──────────────────────────────────────────────
@@ -955,7 +1025,31 @@ function escAttr(s) { return String(s).replace(/"/g,'&quot;').replace(/'/g,'&#39
 // ──────────────────────────────────────────────
 //  INIT
 // ──────────────────────────────────────────────
-render();
+async function init() {
+  setSyncStatus('loading');
+  const local  = loadFromLocal();
+  const server = await loadFromServer();
+
+  if (server && local) {
+    const tServer = new Date(server.lastSaved || 0).getTime();
+    const tLocal  = new Date(local.lastSaved  || 0).getTime();
+    S = tServer >= tLocal ? server : local;
+    if (tLocal > tServer) saveToServer();
+  } else if (server) {
+    S = server;
+  } else if (local) {
+    S = local;
+    saveToServer();
+  } else {
+    S = JSON.parse(JSON.stringify(DEFAULTS));
+  }
+
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(S));
+  if (server) setSyncStatus('synced'); else setSyncStatus('offline');
+  render();
+}
+
+init();
 </script>
 </body>
 </html>

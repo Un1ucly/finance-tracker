@@ -393,70 +393,92 @@
       .if-row { flex-direction: column; }
     }
 
-    /* ── TOPBAR ── */
-    .topbar {
-      background: #09090f;
-      border-bottom: 1px solid var(--border);
-    }
-    .topbar-strip {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 13px 20px; width: 100%; background: transparent;
-      border: none; cursor: pointer; text-decoration: none;
-      color: var(--text); font-family: 'Inter', sans-serif;
-      transition: background .15s;
-    }
-    .topbar-strip + .topbar-strip { border-top: 1px solid var(--border); }
-    .topbar-strip:hover { background: rgba(255,255,255,.03); }
-    .tb-label { font-size: .875rem; font-weight: 500; color: var(--muted); display: flex; align-items: center; gap: 8px; }
-    .tb-arrow { font-size: .65rem; color: rgba(255,255,255,.2); transition: transform .25s; }
-    .topbar-strip.open .tb-arrow { transform: rotate(180deg); }
+    /* ── MENU BUTTON ── */
+    .header { position: relative; }
 
-    .sub-panel {
-      display: none; padding: 14px 20px 18px;
-      border-top: 1px solid var(--border);
-      background: rgba(0,0,0,.25);
+    .menu-btn {
+      position: absolute; top: 16px; right: 16px;
+      width: 36px; height: 36px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+      background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1);
+      border-radius: 10px; cursor: pointer; transition: background .2s; flex-shrink: 0;
     }
-    .sub-panel.open { display: block; }
-    .sub-info { font-size: .8125rem; color: var(--muted); margin-bottom: 12px; line-height: 1.6; }
-    .sub-info strong { color: var(--text); }
-    .sub-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-    .sub-btn {
-      padding: 8px 16px; border-radius: 9px;
+    .menu-btn:hover { background: rgba(255,255,255,.12); }
+    .menu-line { width: 16px; height: 2px; background: rgba(255,255,255,.6); border-radius: 1px; }
+
+    /* Dropdown */
+    .menu-dropdown {
+      position: absolute; top: 60px; right: 16px;
+      width: 260px;
+      background: #1c1c2e;
       border: 1px solid rgba(255,255,255,.1);
-      background: rgba(255,255,255,.05);
+      border-radius: 16px;
+      box-shadow: 0 16px 40px rgba(0,0,0,.6);
+      z-index: 300;
+      overflow: hidden;
+      opacity: 0; transform: translateY(-8px) scale(.97);
+      pointer-events: none;
+      transition: opacity .2s, transform .2s;
+    }
+    .menu-dropdown.open {
+      opacity: 1; transform: translateY(0) scale(1);
+      pointer-events: auto;
+    }
+
+    .dd-section { padding: 14px 16px; }
+    .dd-title { font-size: .6875rem; font-weight: 600; color: rgba(255,255,255,.25); text-transform: uppercase; letter-spacing: .07em; margin-bottom: 10px; }
+    .sub-info { font-size: .8125rem; color: var(--muted); margin-bottom: 10px; line-height: 1.6; }
+    .sub-info strong { color: var(--text); }
+    .sub-actions { display: flex; flex-direction: column; gap: 6px; }
+    .sub-btn {
+      padding: 9px 12px; border-radius: 9px;
+      border: 1px solid rgba(255,255,255,.08);
+      background: rgba(255,255,255,.04);
       color: var(--text); font-family: 'Inter', sans-serif;
       font-size: .8125rem; font-weight: 500; cursor: pointer;
-      text-decoration: none; display: inline-flex; align-items: center; gap: 6px;
-      transition: all .2s;
+      text-decoration: none; display: flex; align-items: center; gap: 8px;
+      transition: background .15s;
+      width: 100%;
     }
-    .sub-btn:hover { background: rgba(255,255,255,.1); }
-    .sub-btn.danger { border-color: rgba(239,68,68,.25); color: #f87171; }
+    .sub-btn:hover { background: rgba(255,255,255,.09); }
+    .sub-btn.danger { color: #f87171; border-color: rgba(239,68,68,.2); }
     .sub-btn.danger:hover { background: rgba(239,68,68,.08); }
+
+    .dd-divider { height: 1px; background: rgba(255,255,255,.07); margin: 0; }
+
+    .dd-logout {
+      display: flex; align-items: center; gap: 8px;
+      padding: 14px 16px; font-size: .875rem; font-weight: 500;
+      color: var(--muted); text-decoration: none;
+      transition: background .15s, color .15s;
+    }
+    .dd-logout:hover { background: rgba(255,255,255,.04); color: var(--text); }
   </style>
 </head>
 <body>
 
-<!-- TOPBAR -->
-<div class="topbar">
-  <button class="topbar-strip" id="sub-strip" onclick="toggleSubPanel()">
-    <span class="tb-label">⚙️ Управление подпиской</span>
-    <span class="tb-arrow">▼</span>
-  </button>
-  <div class="sub-panel" id="sub-panel">
-    <div class="sub-info" id="sub-info">Загрузка…</div>
-    <div class="sub-actions">
-      <a class="sub-btn" id="sub-portal-btn" href="/api/portal" style="display:none">🔄 Изменить карту</a>
-      <button class="sub-btn danger" id="sub-cancel-btn" onclick="cancelSub()" style="display:none">✕ Отменить подписку</button>
-    </div>
-  </div>
-  <a class="topbar-strip" href="/logout" style="text-decoration:none">
-    <span class="tb-label">🚪 Выйти из аккаунта</span>
-    <span class="tb-arrow" style="opacity:0">▼</span>
-  </a>
-</div>
-
 <!-- HEADER -->
 <div class="header">
+  <!-- Menu button -->
+  <button class="menu-btn" id="menu-btn" onclick="toggleMenu(event)" aria-label="Меню">
+    <span class="menu-line"></span>
+    <span class="menu-line"></span>
+  </button>
+
+  <!-- Dropdown -->
+  <div class="menu-dropdown" id="menu-dropdown">
+    <div class="dd-section">
+      <div class="dd-title">Подписка</div>
+      <div class="sub-info" id="sub-info">Загрузка…</div>
+      <div class="sub-actions">
+        <a class="sub-btn" id="sub-portal-btn" href="/api/portal" style="display:none">🔄 Изменить карту</a>
+        <button class="sub-btn danger" id="sub-cancel-btn" onclick="cancelSub()" style="display:none">✕ Отменить подписку</button>
+      </div>
+    </div>
+    <div class="dd-divider"></div>
+    <a class="dd-logout" href="/logout">🚪 Выйти из аккаунта</a>
+  </div>
+
   <h1>💸 Финансовый Трекер</h1>
   <div class="period-row">
     <span class="period-lbl">с</span>
@@ -1110,16 +1132,19 @@ async function init() {
 
 init();
 
-// ── SUBSCRIPTION PANEL ─────────────────────────────────
+// ── MENU DROPDOWN ──────────────────────────────────────
 let subLoaded = false;
 
-function toggleSubPanel() {
-  const strip = document.getElementById('sub-strip');
-  const panel = document.getElementById('sub-panel');
-  strip.classList.toggle('open');
-  panel.classList.toggle('open');
-  if (!subLoaded) loadSub();
+function toggleMenu(e) {
+  e.stopPropagation();
+  const dd = document.getElementById('menu-dropdown');
+  const isOpen = dd.classList.toggle('open');
+  if (isOpen && !subLoaded) loadSub();
 }
+
+document.addEventListener('click', () => {
+  document.getElementById('menu-dropdown')?.classList.remove('open');
+});
 
 async function loadSub() {
   try {

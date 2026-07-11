@@ -37,18 +37,31 @@ async function initDB() {
     expires_at TIMESTAMPTZ NOT NULL
   )`, 'sessions');
 
-  // Create access_tokens with minimal columns; add rest via ALTER
-  await run(`CREATE TABLE IF NOT EXISTS access_tokens (
-    id SERIAL PRIMARY KEY,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    expires_at TIMESTAMPTZ
-  )`, 'access_tokens');
+  // Check if access_tokens has the right schema (needs user_id and id columns).
+  // If old table exists with wrong schema — drop and recreate cleanly.
+  let atOk = false;
+  try {
+    const cols = await pool.query(`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'access_tokens'
+    `);
+    const names = cols.rows.map(r => r.column_name);
+    atOk = names.includes('user_id') && names.includes('id');
+    if (!atOk) console.log('access_tokens columns found:', names.join(', '));
+  } catch { /* doesn't exist yet */ }
 
-  // Migrate: add any columns that might be missing from old schema
-  await run(`ALTER TABLE access_tokens ADD COLUMN IF NOT EXISTS user_id INTEGER`, 'at.user_id');
-  await run(`ALTER TABLE access_tokens ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT TRUE`, 'at.active');
-  await run(`ALTER TABLE access_tokens ADD COLUMN IF NOT EXISTS plan VARCHAR(20)`, 'at.plan');
-  await run(`ALTER TABLE access_tokens ADD COLUMN IF NOT EXISTS stripe_session_id VARCHAR(200)`, 'at.sid');
+  if (!atOk) {
+    await run(`DROP TABLE IF EXISTS access_tokens CASCADE`, 'drop access_tokens');
+    await run(`CREATE TABLE access_tokens (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER,
+      stripe_session_id VARCHAR(200) UNIQUE,
+      plan VARCHAR(20),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      expires_at TIMESTAMPTZ,
+      active BOOLEAN DEFAULT TRUE
+    )`, 'access_tokens');
+  }
 
   // tracker_state: check if user_id is already the primary key
   let needsReset = true;
@@ -375,7 +388,7 @@ app.post('/api/grant-access', async (req, res) => {
     const expiresAt = plan === 'monthly' ? new Date(Date.now() + 35 * 24 * 60 * 60 * 1000) : null;
 
     if (pool) {
-      const ex = await pool.query('SELECT id FROM access_tokens WHERE stripe_session_id = $1', [subId]);
+      const ex = await pool.query('SELECT 1 FROM access_tokens WHERE stripe_session_id = $1', [subId]);
       if (!ex.rows.length) {
         await pool.query(
           `INSERT INTO access_tokens (user_id, stripe_session_id, plan, expires_at, active)

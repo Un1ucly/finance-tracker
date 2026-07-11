@@ -306,23 +306,33 @@ app.post('/api/checkout', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/success', requireAuth, async (req, res) => {
+// No requireAuth here — Stripe redirects may not carry cookies reliably.
+// We recover the user from Stripe session metadata instead.
+app.get('/success', async (req, res) => {
   if (!stripe) return res.redirect('/');
 
   const { session_id } = req.query;
-  if (!session_id) return res.redirect('/pricing');
+  if (!session_id) return res.redirect('/login');
 
   try {
-    const session = await stripe.checkout.sessions.retrieve(session_id);
-    const paid = session.payment_status === 'paid' || session.mode === 'subscription';
-    if (!paid) return res.redirect('/pricing?error=1');
+    const stripeSession = await stripe.checkout.sessions.retrieve(session_id);
+    const paid = stripeSession.payment_status === 'paid' || stripeSession.mode === 'subscription';
+    if (!paid) {
+      console.error('success: payment_status =', stripeSession.payment_status);
+      return res.redirect('/pricing?error=1');
+    }
 
-    const plan = session.mode === 'subscription' ? 'monthly' : 'lifetime';
-    const subId = session.subscription || session_id;
+    const userId = parseInt(stripeSession.metadata?.user_id, 10);
+    if (!userId || isNaN(userId)) {
+      console.error('success: no user_id in metadata');
+      return res.redirect('/login');
+    }
+
+    const plan = stripeSession.mode === 'subscription' ? 'monthly' : 'lifetime';
+    const subId = stripeSession.subscription || session_id;
     const expiresAt = plan === 'monthly' ? new Date(Date.now() + 35 * 24 * 60 * 60 * 1000) : null;
 
     if (pool) {
-      // Check first to avoid ON CONFLICT issues with old schema
       const existing = await pool.query(
         'SELECT id FROM access_tokens WHERE stripe_session_id = $1',
         [subId]
@@ -331,16 +341,22 @@ app.get('/success', requireAuth, async (req, res) => {
         await pool.query(
           `INSERT INTO access_tokens (user_id, stripe_session_id, plan, expires_at, active)
            VALUES ($1, $2, $3, $4, TRUE)`,
-          [req.userId, subId, plan, expiresAt]
+          [userId, subId, plan, expiresAt]
         );
+        console.log(`Access granted: user ${userId}, plan ${plan}`);
       }
     }
-    res.redirect('/');
+
+    // Try to redirect to tracker if session cookie is present and matches
+    const authSession = await getSession(req.cookies?.session_token);
+    if (authSession?.user_id === userId) {
+      return res.redirect('/');
+    }
+    // Cookie not available (Stripe cross-site redirect issue) — send to login
+    res.redirect('/login?paid=1');
   } catch (e) {
     console.error('success error:', e.message);
-    // Webhook may have already granted access — check before giving up
-    if (await hasAccess(req.userId)) return res.redirect('/');
-    res.redirect('/pricing?error=1');
+    res.redirect('/login?paid=1');
   }
 });
 

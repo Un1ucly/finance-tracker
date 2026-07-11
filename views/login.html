@@ -207,6 +207,14 @@
 </div>
 
 <script>
+  // Show success message if redirected after payment
+  const params = new URLSearchParams(location.search);
+  if (params.get('paid')) {
+    const el = document.getElementById('success-box');
+    el.textContent = 'Оплата прошла успешно! Войди в аккаунт для доступа к трекеру.';
+    el.classList.add('show');
+  }
+
   let activeTab = 'login';
 
   function setTab(tab) {

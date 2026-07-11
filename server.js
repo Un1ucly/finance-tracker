@@ -18,77 +18,64 @@ if (process.env.DATABASE_URL) {
 }
 
 async function initDB() {
-  const client = await pool.connect();
+  // Run each statement independently — one failure never rolls back others
+  const run = async (sql, label) => {
+    try { await pool.query(sql); }
+    catch (e) { console.warn(`initDB [${label}]:`, e.message); }
+  };
+
+  await run(`CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )`, 'users');
+
+  await run(`CREATE TABLE IF NOT EXISTS sessions (
+    token VARCHAR(64) PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TIMESTAMPTZ NOT NULL
+  )`, 'sessions');
+
+  // Create access_tokens with minimal columns; add rest via ALTER
+  await run(`CREATE TABLE IF NOT EXISTS access_tokens (
+    id SERIAL PRIMARY KEY,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    expires_at TIMESTAMPTZ
+  )`, 'access_tokens');
+
+  // Migrate: add any columns that might be missing from old schema
+  await run(`ALTER TABLE access_tokens ADD COLUMN IF NOT EXISTS user_id INTEGER`, 'at.user_id');
+  await run(`ALTER TABLE access_tokens ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT TRUE`, 'at.active');
+  await run(`ALTER TABLE access_tokens ADD COLUMN IF NOT EXISTS plan VARCHAR(20)`, 'at.plan');
+  await run(`ALTER TABLE access_tokens ADD COLUMN IF NOT EXISTS stripe_session_id VARCHAR(200)`, 'at.sid');
+
+  // tracker_state: check if user_id is already the primary key
+  let needsReset = true;
   try {
-    await client.query('BEGIN');
-
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
-        email VARCHAR(255) UNIQUE NOT NULL,
-        password_hash VARCHAR(255) NOT NULL,
-        created_at TIMESTAMPTZ DEFAULT NOW()
-      )
-    `);
-
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS sessions (
-        token VARCHAR(64) PRIMARY KEY,
-        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-        expires_at TIMESTAMPTZ NOT NULL
-      )
-    `);
-
-    // access_tokens: create or migrate existing table
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS access_tokens (
-        id SERIAL PRIMARY KEY,
-        stripe_session_id VARCHAR(200),
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        expires_at TIMESTAMPTZ
-      )
-    `);
-    await client.query(`ALTER TABLE access_tokens ADD COLUMN IF NOT EXISTS user_id INTEGER`);
-    await client.query(`ALTER TABLE access_tokens ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT TRUE`);
-    await client.query(`ALTER TABLE access_tokens ADD COLUMN IF NOT EXISTS plan VARCHAR(20)`);
-    // Add UNIQUE on stripe_session_id if missing (needed for ON CONFLICT)
-    await client.query(`
-      DO $$ BEGIN
-        ALTER TABLE access_tokens ADD CONSTRAINT access_tokens_sid_key UNIQUE (stripe_session_id);
-      EXCEPTION WHEN duplicate_table THEN NULL;
-      END $$
-    `);
-
-    // tracker_state: check if user_id is the primary key
-    const pkCheck = await client.query(`
+    const r = await pool.query(`
       SELECT kcu.column_name
       FROM information_schema.table_constraints tc
       JOIN information_schema.key_column_usage kcu
-        ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+        ON tc.constraint_name = kcu.constraint_name
+        AND tc.table_schema = kcu.table_schema
       WHERE tc.table_name = 'tracker_state'
         AND tc.constraint_type = 'PRIMARY KEY'
         AND kcu.column_name = 'user_id'
     `);
-    if (pkCheck.rows.length === 0) {
-      // Old schema (id PK or missing table) — drop and recreate
-      await client.query(`DROP TABLE IF EXISTS tracker_state CASCADE`);
-    }
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS tracker_state (
-        user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-        data JSONB NOT NULL,
-        updated_at TIMESTAMPTZ DEFAULT NOW()
-      )
-    `);
+    needsReset = r.rows.length === 0;
+  } catch { /* table probably doesn't exist yet */ }
 
-    await client.query('COMMIT');
-    console.log('DB ready');
-  } catch (e) {
-    await client.query('ROLLBACK');
-    console.error('DB init error:', e.message);
-  } finally {
-    client.release();
+  if (needsReset) {
+    await run(`DROP TABLE IF EXISTS tracker_state CASCADE`, 'drop tracker_state');
   }
+  await run(`CREATE TABLE IF NOT EXISTS tracker_state (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    data JSONB NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+  )`, 'tracker_state');
+
+  console.log('DB ready');
 }
 
 // ── STRIPE ───────────────────────────────────────
@@ -333,26 +320,31 @@ app.get('/success', async (req, res) => {
     const expiresAt = plan === 'monthly' ? new Date(Date.now() + 35 * 24 * 60 * 60 * 1000) : null;
 
     if (pool) {
-      const existing = await pool.query(
-        'SELECT id FROM access_tokens WHERE stripe_session_id = $1',
-        [subId]
-      );
-      if (!existing.rows.length) {
-        await pool.query(
-          `INSERT INTO access_tokens (user_id, stripe_session_id, plan, expires_at, active)
-           VALUES ($1, $2, $3, $4, TRUE)`,
-          [userId, subId, plan, expiresAt]
+      try {
+        const existing = await pool.query(
+          'SELECT id FROM access_tokens WHERE stripe_session_id = $1',
+          [subId]
         );
-        console.log(`Access granted: user ${userId}, plan ${plan}`);
+        if (!existing.rows.length) {
+          await pool.query(
+            `INSERT INTO access_tokens (user_id, stripe_session_id, plan, expires_at, active)
+             VALUES ($1, $2, $3, $4, TRUE)`,
+            [userId, subId, plan, expiresAt]
+          );
+          console.log(`Access granted: user ${userId}, plan ${plan}`);
+        }
+      } catch (dbErr) {
+        // Log the actual DB error so we can see it in Railway logs
+        console.error('success DB insert error:', dbErr.message, '| columns:', dbErr.detail || '');
       }
     }
 
-    // Try to redirect to tracker if session cookie is present and matches
+    // Try to redirect to tracker if session cookie matches
     const authSession = await getSession(req.cookies?.session_token);
     if (authSession?.user_id === userId) {
       return res.redirect('/');
     }
-    // Cookie not available (Stripe cross-site redirect issue) — send to login
+    // Cookie not present after Stripe redirect — send to login
     res.redirect('/login?paid=1');
   } catch (e) {
     console.error('success error:', e.message);

@@ -392,9 +392,69 @@
       .add-form-row { grid-template-columns: 1fr; }
       .if-row { flex-direction: column; }
     }
+
+    /* ── TOPBAR ── */
+    .topbar {
+      position: sticky; top: 0; z-index: 100;
+      background: #09090f;
+      border-bottom: 1px solid var(--border);
+    }
+    .topbar-strip {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 13px 20px; width: 100%; background: transparent;
+      border: none; cursor: pointer; text-decoration: none;
+      color: var(--text); font-family: 'Inter', sans-serif;
+      transition: background .15s;
+    }
+    .topbar-strip + .topbar-strip { border-top: 1px solid var(--border); }
+    .topbar-strip:hover { background: rgba(255,255,255,.03); }
+    .tb-label { font-size: .875rem; font-weight: 500; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+    .tb-arrow { font-size: .65rem; color: rgba(255,255,255,.2); transition: transform .25s; }
+    .topbar-strip.open .tb-arrow { transform: rotate(180deg); }
+
+    .sub-panel {
+      display: none; padding: 14px 20px 18px;
+      border-top: 1px solid var(--border);
+      background: rgba(0,0,0,.25);
+    }
+    .sub-panel.open { display: block; }
+    .sub-info { font-size: .8125rem; color: var(--muted); margin-bottom: 12px; line-height: 1.6; }
+    .sub-info strong { color: var(--text); }
+    .sub-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .sub-btn {
+      padding: 8px 16px; border-radius: 9px;
+      border: 1px solid rgba(255,255,255,.1);
+      background: rgba(255,255,255,.05);
+      color: var(--text); font-family: 'Inter', sans-serif;
+      font-size: .8125rem; font-weight: 500; cursor: pointer;
+      text-decoration: none; display: inline-flex; align-items: center; gap: 6px;
+      transition: all .2s;
+    }
+    .sub-btn:hover { background: rgba(255,255,255,.1); }
+    .sub-btn.danger { border-color: rgba(239,68,68,.25); color: #f87171; }
+    .sub-btn.danger:hover { background: rgba(239,68,68,.08); }
   </style>
 </head>
 <body>
+
+<!-- TOPBAR -->
+<div class="topbar">
+  <button class="topbar-strip" id="sub-strip" onclick="toggleSubPanel()">
+    <span class="tb-label">⚙️ Управление подпиской</span>
+    <span class="tb-arrow">▼</span>
+  </button>
+  <div class="sub-panel" id="sub-panel">
+    <div class="sub-info" id="sub-info">Загрузка…</div>
+    <div class="sub-actions">
+      <a class="sub-btn" id="sub-portal-btn" href="/api/portal" style="display:none">🔄 Изменить карту</a>
+      <button class="sub-btn danger" id="sub-cancel-btn" onclick="cancelSub()" style="display:none">✕ Отменить подписку</button>
+    </div>
+  </div>
+  <a class="topbar-strip" href="/logout" style="text-decoration:none">
+    <span class="tb-label">🚪 Выйти из аккаунта</span>
+    <span class="tb-arrow" style="opacity:0">▼</span>
+  </a>
+</div>
 
 <!-- HEADER -->
 <div class="header">
@@ -1050,6 +1110,65 @@ async function init() {
 }
 
 init();
+
+// ── SUBSCRIPTION PANEL ─────────────────────────────────
+let subLoaded = false;
+
+function toggleSubPanel() {
+  const strip = document.getElementById('sub-strip');
+  const panel = document.getElementById('sub-panel');
+  strip.classList.toggle('open');
+  panel.classList.toggle('open');
+  if (!subLoaded) loadSub();
+}
+
+async function loadSub() {
+  try {
+    const r = await fetch('/api/subscription');
+    const d = await r.json();
+    subLoaded = true;
+    renderSub(d);
+  } catch {
+    document.getElementById('sub-info').textContent = 'Не удалось загрузить данные подписки.';
+  }
+}
+
+function renderSub(d) {
+  const info   = document.getElementById('sub-info');
+  const portal = document.getElementById('sub-portal-btn');
+  const cancel = document.getElementById('sub-cancel-btn');
+
+  if (!d || !d.plan) {
+    info.innerHTML = 'Активная подписка не найдена.';
+    return;
+  }
+
+  const planLabel  = d.plan === 'monthly' ? 'Ежемесячная' : 'Пожизненная';
+  let   expiryText = 'Бессрочно';
+  if (d.plan === 'monthly' && d.expires_at) {
+    const dt = new Date(d.expires_at);
+    expiryText = 'до ' + dt.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+  }
+
+  info.innerHTML = `Тариф: <strong>${planLabel}</strong>&nbsp;·&nbsp;<strong>${expiryText}</strong>`;
+  if (d.customer_id) portal.style.display = 'inline-flex';
+  if (d.plan === 'monthly') cancel.style.display = 'inline-flex';
+}
+
+async function cancelSub() {
+  if (!confirm('Отменить подписку? Доступ сохранится до конца оплаченного периода.')) return;
+  try {
+    const r = await fetch('/api/cancel-subscription', { method: 'POST' });
+    const d = await r.json();
+    if (d.ok) {
+      alert('Подписка отменена. Доступ сохранится до конца периода.');
+      subLoaded = false;
+      loadSub();
+    } else {
+      alert('Ошибка: ' + (d.error || 'не удалось отменить'));
+    }
+  } catch { alert('Ошибка соединения'); }
+}
 </script>
 </body>
 </html>

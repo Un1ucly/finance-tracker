@@ -57,10 +57,13 @@ async function initDB() {
       user_id INTEGER,
       stripe_session_id VARCHAR(200) UNIQUE,
       plan VARCHAR(20),
+      customer_id VARCHAR(200),
       created_at TIMESTAMPTZ DEFAULT NOW(),
       expires_at TIMESTAMPTZ,
       active BOOLEAN DEFAULT TRUE
     )`, 'access_tokens');
+  } else {
+    await run(`ALTER TABLE access_tokens ADD COLUMN IF NOT EXISTS customer_id VARCHAR(200)`, 'at.customer_id');
   }
 
   // tracker_state: check if user_id is already the primary key
@@ -390,12 +393,13 @@ app.post('/api/grant-access', async (req, res) => {
     if (pool) {
       const ex = await pool.query('SELECT 1 FROM access_tokens WHERE stripe_session_id = $1', [subId]);
       if (!ex.rows.length) {
+        const customerId = ss.customer || null;
         await pool.query(
-          `INSERT INTO access_tokens (user_id, stripe_session_id, plan, expires_at, active)
-           VALUES ($1,$2,$3,$4,TRUE)`,
-          [userId, subId, plan, expiresAt]
+          `INSERT INTO access_tokens (user_id, stripe_session_id, plan, expires_at, active, customer_id)
+           VALUES ($1,$2,$3,$4,TRUE,$5)`,
+          [userId, subId, plan, expiresAt, customerId]
         );
-        console.log(`Access granted: user=${userId} plan=${plan}`);
+        console.log(`Access granted: user=${userId} plan=${plan} customer=${customerId}`);
       }
     }
 
@@ -434,6 +438,75 @@ app.post('/api/state', requireAuth, async (req, res) => {
   } catch (e) {
     console.error('POST state:', e.message);
     res.status(500).json({ ok: false });
+  }
+});
+
+// ── SUBSCRIPTION MANAGEMENT ──────────────────────────
+
+app.get('/api/subscription', requireAuth, async (req, res) => {
+  if (!pool) return res.json({ plan: null });
+  try {
+    const r = await pool.query(
+      `SELECT plan, expires_at, customer_id FROM access_tokens
+       WHERE user_id = $1 AND active = TRUE
+       ORDER BY created_at DESC LIMIT 1`,
+      [req.userId]
+    );
+    res.json(r.rows[0] || { plan: null });
+  } catch (e) {
+    res.json({ plan: null, error: e.message });
+  }
+});
+
+app.get('/api/portal', requireAuth, async (req, res) => {
+  if (!stripe || !pool) return res.redirect('/');
+  try {
+    const r = await pool.query(
+      `SELECT customer_id FROM access_tokens WHERE user_id = $1 AND active = TRUE LIMIT 1`,
+      [req.userId]
+    );
+    const customerId = r.rows[0]?.customer_id;
+    if (!customerId) return res.redirect('/');
+    const proto = req.headers['x-forwarded-proto'] || 'https';
+    const base  = process.env.BASE_URL || `${proto}://${req.headers.host}`;
+    const portal = await stripe.billingPortal.sessions.create({
+      customer: customerId,
+      return_url: `${base}/`,
+    });
+    res.redirect(portal.url);
+  } catch (e) {
+    console.error('portal error:', e.message);
+    res.redirect('/');
+  }
+});
+
+app.post('/api/cancel-subscription', requireAuth, async (req, res) => {
+  if (!stripe || !pool) return res.json({ ok: false, error: 'Не настроен' });
+  try {
+    const r = await pool.query(
+      `SELECT stripe_session_id, customer_id FROM access_tokens
+       WHERE user_id = $1 AND active = TRUE AND plan = 'monthly' LIMIT 1`,
+      [req.userId]
+    );
+    if (!r.rows.length) return res.json({ ok: false, error: 'Активная подписка не найдена' });
+
+    const { stripe_session_id, customer_id } = r.rows[0];
+    // stripe_session_id for monthly = subscription ID (sub_xxx)
+    if (stripe_session_id?.startsWith('sub_')) {
+      await stripe.subscriptions.cancel(stripe_session_id);
+    } else if (customer_id) {
+      // Try via customer subscriptions
+      const subs = await stripe.subscriptions.list({ customer: customer_id, status: 'active', limit: 1 });
+      if (subs.data.length) await stripe.subscriptions.cancel(subs.data[0].id);
+    }
+    await pool.query(
+      `UPDATE access_tokens SET active = FALSE WHERE user_id = $1 AND plan = 'monthly'`,
+      [req.userId]
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('cancel-sub error:', e.message);
+    res.json({ ok: false, error: e.message });
   }
 });
 

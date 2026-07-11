@@ -293,64 +293,98 @@ app.post('/api/checkout', requireAuth, async (req, res) => {
   }
 });
 
-// No requireAuth here — Stripe redirects may not carry cookies reliably.
-// We recover the user from Stripe session metadata instead.
 app.get('/success', async (req, res) => {
   if (!stripe) return res.redirect('/');
 
   const { session_id } = req.query;
   if (!session_id) return res.redirect('/login');
 
+  const dbg = { session_id, step: 'start' };
+
   try {
     const stripeSession = await stripe.checkout.sessions.retrieve(session_id);
+    dbg.payment_status = stripeSession.payment_status;
+    dbg.mode = stripeSession.mode;
+    dbg.metadata = stripeSession.metadata;
+    dbg.step = 'stripe_ok';
+
     const paid = stripeSession.payment_status === 'paid' || stripeSession.mode === 'subscription';
     if (!paid) {
-      console.error('success: payment_status =', stripeSession.payment_status);
-      return res.redirect('/pricing?error=1');
+      dbg.step = 'not_paid';
+      return res.send(debugHtml(dbg));
     }
 
     const userId = parseInt(stripeSession.metadata?.user_id, 10);
+    dbg.userId = userId;
+    dbg.step = 'got_user_id';
+
     if (!userId || isNaN(userId)) {
-      console.error('success: no user_id in metadata');
-      return res.redirect('/login');
+      dbg.step = 'no_user_id_in_metadata';
+      return res.send(debugHtml(dbg));
     }
 
     const plan = stripeSession.mode === 'subscription' ? 'monthly' : 'lifetime';
     const subId = stripeSession.subscription || session_id;
     const expiresAt = plan === 'monthly' ? new Date(Date.now() + 35 * 24 * 60 * 60 * 1000) : null;
+    dbg.plan = plan;
+    dbg.subId = subId;
 
     if (pool) {
       try {
-        const existing = await pool.query(
-          'SELECT id FROM access_tokens WHERE stripe_session_id = $1',
-          [subId]
-        );
+        const existing = await pool.query('SELECT id FROM access_tokens WHERE stripe_session_id = $1', [subId]);
+        dbg.already_exists = existing.rows.length > 0;
         if (!existing.rows.length) {
           await pool.query(
-            `INSERT INTO access_tokens (user_id, stripe_session_id, plan, expires_at, active)
-             VALUES ($1, $2, $3, $4, TRUE)`,
+            `INSERT INTO access_tokens (user_id, stripe_session_id, plan, expires_at, active) VALUES ($1, $2, $3, $4, TRUE)`,
             [userId, subId, plan, expiresAt]
           );
-          console.log(`Access granted: user ${userId}, plan ${plan}`);
+          dbg.step = 'inserted';
+        } else {
+          dbg.step = 'already_had_access';
         }
       } catch (dbErr) {
-        // Log the actual DB error so we can see it in Railway logs
-        console.error('success DB insert error:', dbErr.message, '| columns:', dbErr.detail || '');
+        dbg.step = 'db_error';
+        dbg.db_error = dbErr.message;
+        dbg.db_detail = dbErr.detail;
+        console.error('success DB error:', dbErr.message);
+        return res.send(debugHtml(dbg));
       }
+    } else {
+      dbg.step = 'no_pool';
     }
 
-    // Try to redirect to tracker if session cookie matches
     const authSession = await getSession(req.cookies?.session_token);
-    if (authSession?.user_id === userId) {
-      return res.redirect('/');
-    }
-    // Cookie not present after Stripe redirect — send to login
-    res.redirect('/login?paid=1');
+    dbg.has_cookie = !!authSession;
+    dbg.cookie_user_id = authSession?.user_id;
+    dbg.match = authSession?.user_id === userId;
+
+    // Show debug page so we can see what happened
+    return res.send(debugHtml(dbg));
   } catch (e) {
+    dbg.step = 'exception';
+    dbg.error = e.message;
     console.error('success error:', e.message);
-    res.redirect('/login?paid=1');
+    return res.send(debugHtml(dbg));
   }
 });
+
+function debugHtml(info) {
+  const ok = info.step === 'inserted' || info.step === 'already_had_access';
+  const nextHref = info.match ? '/' : '/login?paid=1';
+  const nextLabel = info.match ? '→ Открыть трекер' : '→ Войти в аккаунт';
+  return `<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<style>
+  body{font-family:monospace;background:#080810;color:#e2e8f0;padding:40px;margin:0}
+  h2{color:${ok ? '#22c55e' : '#f87171'};margin-bottom:16px}
+  pre{background:#12121e;border:1px solid rgba(255,255,255,.08);padding:20px;border-radius:10px;overflow:auto;font-size:13px}
+  .btn{display:inline-block;margin-top:20px;padding:13px 26px;background:#7c3aed;color:#fff;text-decoration:none;border-radius:10px;font-size:15px;font-weight:600}
+</style></head><body>
+<h2>${ok ? '✓ Оплата принята' : '✗ Что-то пошло не так'}</h2>
+<pre>${JSON.stringify(info, null, 2)}</pre>
+<a href="${nextHref}" class="btn">${nextLabel}</a>
+</body></html>`;
+}
 
 // ── TRACKER STATE API ─────────────────────────────
 

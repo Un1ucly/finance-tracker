@@ -275,7 +275,8 @@ app.post('/api/checkout', requireAuth, async (req, res) => {
     return res.status(400).json({ error: `Не задан STRIPE_PRICE_${plan === 'monthly' ? 'MONTHLY' : 'LIFETIME'}` });
   }
 
-  const base = process.env.BASE_URL || `http://localhost:${PORT}`;
+  const proto = req.headers['x-forwarded-proto'] || 'https';
+  const base = process.env.BASE_URL || `${proto}://${req.headers.host}`;
   try {
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
@@ -421,6 +422,20 @@ app.post('/api/state', requireAuth, async (req, res) => {
     console.error('POST state:', e.message);
     res.status(500).json({ ok: false });
   }
+});
+
+// Status check
+app.get('/ping', (req, res) => {
+  const proto = req.headers['x-forwarded-proto'] || 'https';
+  const base = process.env.BASE_URL || `${proto}://${req.headers.host}`;
+  res.json({
+    ok: true,
+    version: '2026-07-11-v5',
+    base_url: base,
+    stripe: !!stripe,
+    db: !!pool,
+    base_url_env: process.env.BASE_URL || null,
+  });
 });
 
 // Fallback

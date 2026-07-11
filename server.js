@@ -293,98 +293,106 @@ app.post('/api/checkout', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/success', async (req, res) => {
-  if (!stripe) return res.redirect('/');
+// /success serves a page that calls /api/grant-access via AJAX.
+// AJAX from same origin always sends cookies — no cross-site cookie issue.
+app.get('/success', (req, res) => {
+  const sid = (req.query.session_id || '').replace(/[^a-zA-Z0-9_-]/g, '');
+  if (!sid) return res.redirect('/login');
+  res.send(`<!DOCTYPE html>
+<html lang="ru"><head><meta charset="UTF-8"><title>Проверка оплаты</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:Inter,sans-serif;background:#080810;color:#e2e8f0;
+       min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;padding:20px}
+  .spin{width:44px;height:44px;border:3px solid rgba(124,58,237,.25);
+        border-top-color:#7c3aed;border-radius:50%;animation:s .8s linear infinite}
+  @keyframes s{to{transform:rotate(360deg)}}
+  #msg{font-size:1rem;color:#94a3b8;text-align:center}
+  #err{color:#f87171;font-size:.875rem;text-align:center;display:none;max-width:340px}
+  .btn{margin-top:8px;padding:13px 28px;background:#7c3aed;color:#fff;border:none;
+       border-radius:10px;cursor:pointer;font-size:1rem;font-weight:600;display:none}
+</style></head>
+<body>
+  <div class="spin" id="spin"></div>
+  <p id="msg">Проверяем оплату…</p>
+  <p id="err"></p>
+  <button class="btn" id="btn" onclick="grant()">Повторить</button>
+<script>
+const SID = '${sid}';
+async function grant() {
+  document.getElementById('spin').style.display = 'block';
+  document.getElementById('msg').textContent = 'Проверяем оплату…';
+  document.getElementById('err').style.display = 'none';
+  document.getElementById('btn').style.display = 'none';
+  try {
+    const r = await fetch('/api/grant-access', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({session_id: SID})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      document.getElementById('msg').textContent = 'Готово! Открываем трекер…';
+      setTimeout(() => location.href = '/', 600);
+    } else if (d.login) {
+      document.getElementById('msg').textContent = 'Оплата принята. Войдите в аккаунт.';
+      setTimeout(() => location.href = '/login?paid=1', 800);
+    } else {
+      throw new Error(d.error || 'Неизвестная ошибка');
+    }
+  } catch(e) {
+    document.getElementById('spin').style.display = 'none';
+    document.getElementById('err').textContent = 'Ошибка: ' + e.message;
+    document.getElementById('err').style.display = 'block';
+    document.getElementById('btn').style.display = 'inline-block';
+    document.getElementById('msg').textContent = '';
+  }
+}
+grant();
+</script>
+</body></html>`);
+});
 
-  const { session_id } = req.query;
-  if (!session_id) return res.redirect('/login');
+app.post('/api/grant-access', async (req, res) => {
+  if (!stripe) return res.json({ ok: true });
 
-  const dbg = { session_id, step: 'start' };
+  const { session_id } = req.body || {};
+  if (!session_id) return res.status(400).json({ ok: false, error: 'No session_id' });
 
   try {
-    const stripeSession = await stripe.checkout.sessions.retrieve(session_id);
-    dbg.payment_status = stripeSession.payment_status;
-    dbg.mode = stripeSession.mode;
-    dbg.metadata = stripeSession.metadata;
-    dbg.step = 'stripe_ok';
+    const ss = await stripe.checkout.sessions.retrieve(session_id);
+    const paid = ss.payment_status === 'paid' || ss.mode === 'subscription';
+    if (!paid) return res.json({ ok: false, error: `payment_status=${ss.payment_status}` });
 
-    const paid = stripeSession.payment_status === 'paid' || stripeSession.mode === 'subscription';
-    if (!paid) {
-      dbg.step = 'not_paid';
-      return res.send(debugHtml(dbg));
-    }
-
-    const userId = parseInt(stripeSession.metadata?.user_id, 10);
-    dbg.userId = userId;
-    dbg.step = 'got_user_id';
-
+    const userId = parseInt(ss.metadata?.user_id, 10);
     if (!userId || isNaN(userId)) {
-      dbg.step = 'no_user_id_in_metadata';
-      return res.send(debugHtml(dbg));
+      return res.json({ ok: false, error: 'No user_id in Stripe metadata' });
     }
 
-    const plan = stripeSession.mode === 'subscription' ? 'monthly' : 'lifetime';
-    const subId = stripeSession.subscription || session_id;
+    const plan = ss.mode === 'subscription' ? 'monthly' : 'lifetime';
+    const subId = ss.subscription || session_id;
     const expiresAt = plan === 'monthly' ? new Date(Date.now() + 35 * 24 * 60 * 60 * 1000) : null;
-    dbg.plan = plan;
-    dbg.subId = subId;
 
     if (pool) {
-      try {
-        const existing = await pool.query('SELECT id FROM access_tokens WHERE stripe_session_id = $1', [subId]);
-        dbg.already_exists = existing.rows.length > 0;
-        if (!existing.rows.length) {
-          await pool.query(
-            `INSERT INTO access_tokens (user_id, stripe_session_id, plan, expires_at, active) VALUES ($1, $2, $3, $4, TRUE)`,
-            [userId, subId, plan, expiresAt]
-          );
-          dbg.step = 'inserted';
-        } else {
-          dbg.step = 'already_had_access';
-        }
-      } catch (dbErr) {
-        dbg.step = 'db_error';
-        dbg.db_error = dbErr.message;
-        dbg.db_detail = dbErr.detail;
-        console.error('success DB error:', dbErr.message);
-        return res.send(debugHtml(dbg));
+      const ex = await pool.query('SELECT id FROM access_tokens WHERE stripe_session_id = $1', [subId]);
+      if (!ex.rows.length) {
+        await pool.query(
+          `INSERT INTO access_tokens (user_id, stripe_session_id, plan, expires_at, active)
+           VALUES ($1,$2,$3,$4,TRUE)`,
+          [userId, subId, plan, expiresAt]
+        );
+        console.log(`Access granted: user=${userId} plan=${plan}`);
       }
-    } else {
-      dbg.step = 'no_pool';
     }
 
     const authSession = await getSession(req.cookies?.session_token);
-    dbg.has_cookie = !!authSession;
-    dbg.cookie_user_id = authSession?.user_id;
-    dbg.match = authSession?.user_id === userId;
-
-    // Show debug page so we can see what happened
-    return res.send(debugHtml(dbg));
+    if (authSession) return res.json({ ok: true });
+    return res.json({ ok: false, login: true });
   } catch (e) {
-    dbg.step = 'exception';
-    dbg.error = e.message;
-    console.error('success error:', e.message);
-    return res.send(debugHtml(dbg));
+    console.error('grant-access error:', e.message, e.detail || '');
+    return res.status(500).json({ ok: false, error: e.message });
   }
 });
-
-function debugHtml(info) {
-  const ok = info.step === 'inserted' || info.step === 'already_had_access';
-  const nextHref = info.match ? '/' : '/login?paid=1';
-  const nextLabel = info.match ? '→ Открыть трекер' : '→ Войти в аккаунт';
-  return `<!DOCTYPE html>
-<html lang="ru"><head><meta charset="utf-8">
-<style>
-  body{font-family:monospace;background:#080810;color:#e2e8f0;padding:40px;margin:0}
-  h2{color:${ok ? '#22c55e' : '#f87171'};margin-bottom:16px}
-  pre{background:#12121e;border:1px solid rgba(255,255,255,.08);padding:20px;border-radius:10px;overflow:auto;font-size:13px}
-  .btn{display:inline-block;margin-top:20px;padding:13px 26px;background:#7c3aed;color:#fff;text-decoration:none;border-radius:10px;font-size:15px;font-weight:600}
-</style></head><body>
-<h2>${ok ? '✓ Оплата принята' : '✗ Что-то пошло не так'}</h2>
-<pre>${JSON.stringify(info, null, 2)}</pre>
-<a href="${nextHref}" class="btn">${nextLabel}</a>
-</body></html>`;
-}
 
 // ── TRACKER STATE API ─────────────────────────────
 

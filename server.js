@@ -18,37 +18,76 @@ if (process.env.DATABASE_URL) {
 }
 
 async function initDB() {
+  const client = await pool.connect();
   try {
-    await pool.query(`
+    await client.query('BEGIN');
+
+    await client.query(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         email VARCHAR(255) UNIQUE NOT NULL,
         password_hash VARCHAR(255) NOT NULL,
         created_at TIMESTAMPTZ DEFAULT NOW()
-      );
+      )
+    `);
+
+    await client.query(`
       CREATE TABLE IF NOT EXISTS sessions (
         token VARCHAR(64) PRIMARY KEY,
         user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
         expires_at TIMESTAMPTZ NOT NULL
-      );
+      )
+    `);
+
+    // access_tokens: create or migrate existing table
+    await client.query(`
       CREATE TABLE IF NOT EXISTS access_tokens (
         id SERIAL PRIMARY KEY,
-        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-        stripe_session_id VARCHAR(200) UNIQUE,
-        plan VARCHAR(20),
+        stripe_session_id VARCHAR(200),
         created_at TIMESTAMPTZ DEFAULT NOW(),
-        expires_at TIMESTAMPTZ,
-        active BOOLEAN DEFAULT TRUE
-      );
+        expires_at TIMESTAMPTZ
+      )
+    `);
+    await client.query(`ALTER TABLE access_tokens ADD COLUMN IF NOT EXISTS user_id INTEGER`);
+    await client.query(`ALTER TABLE access_tokens ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT TRUE`);
+    await client.query(`ALTER TABLE access_tokens ADD COLUMN IF NOT EXISTS plan VARCHAR(20)`);
+    // Add UNIQUE on stripe_session_id if missing (needed for ON CONFLICT)
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE access_tokens ADD CONSTRAINT access_tokens_sid_key UNIQUE (stripe_session_id);
+      EXCEPTION WHEN duplicate_table THEN NULL;
+      END $$
+    `);
+
+    // tracker_state: check if user_id is the primary key
+    const pkCheck = await client.query(`
+      SELECT kcu.column_name
+      FROM information_schema.table_constraints tc
+      JOIN information_schema.key_column_usage kcu
+        ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+      WHERE tc.table_name = 'tracker_state'
+        AND tc.constraint_type = 'PRIMARY KEY'
+        AND kcu.column_name = 'user_id'
+    `);
+    if (pkCheck.rows.length === 0) {
+      // Old schema (id PK or missing table) — drop and recreate
+      await client.query(`DROP TABLE IF EXISTS tracker_state CASCADE`);
+    }
+    await client.query(`
       CREATE TABLE IF NOT EXISTS tracker_state (
         user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
         data JSONB NOT NULL,
         updated_at TIMESTAMPTZ DEFAULT NOW()
-      );
+      )
     `);
+
+    await client.query('COMMIT');
     console.log('DB ready');
   } catch (e) {
+    await client.query('ROLLBACK');
     console.error('DB init error:', e.message);
+  } finally {
+    client.release();
   }
 }
 
@@ -283,16 +322,25 @@ app.get('/success', requireAuth, async (req, res) => {
     const expiresAt = plan === 'monthly' ? new Date(Date.now() + 35 * 24 * 60 * 60 * 1000) : null;
 
     if (pool) {
-      await pool.query(
-        `INSERT INTO access_tokens (user_id, stripe_session_id, plan, expires_at)
-         VALUES ($1, $2, $3, $4) ON CONFLICT (stripe_session_id) DO NOTHING`,
-        [req.userId, subId, plan, expiresAt]
+      // Check first to avoid ON CONFLICT issues with old schema
+      const existing = await pool.query(
+        'SELECT id FROM access_tokens WHERE stripe_session_id = $1',
+        [subId]
       );
+      if (!existing.rows.length) {
+        await pool.query(
+          `INSERT INTO access_tokens (user_id, stripe_session_id, plan, expires_at, active)
+           VALUES ($1, $2, $3, $4, TRUE)`,
+          [req.userId, subId, plan, expiresAt]
+        );
+      }
     }
     res.redirect('/');
   } catch (e) {
-    console.error('success:', e.message);
-    res.redirect('/pricing');
+    console.error('success error:', e.message);
+    // Webhook may have already granted access — check before giving up
+    if (await hasAccess(req.userId)) return res.redirect('/');
+    res.redirect('/pricing?error=1');
   }
 });
 

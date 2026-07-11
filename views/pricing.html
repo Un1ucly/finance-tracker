@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Выбери план — Финансовый Трекер</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #080810; --surface: #12121e; --border: rgba(255,255,255,0.07);
+      --text: #e2e8f0; --muted: #94a3b8; --accent: #7c3aed;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+    .topbar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+    }
+    .topbar-logo { font-size: 1rem; font-weight: 700; color: #fff; }
+    .btn-logout {
+      background: transparent;
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 8px;
+      color: var(--muted);
+      cursor: pointer;
+      font-family: 'Inter', sans-serif;
+      font-size: .8125rem;
+      padding: 7px 14px;
+      transition: all .2s;
+      text-decoration: none;
+      display: inline-block;
+    }
+    .btn-logout:hover { color: #fff; background: rgba(255,255,255,.06); }
+
+    .hero {
+      background: linear-gradient(135deg, #0f0f1e 0%, #1a0a2e 50%, #0a1020 100%);
+      padding: 60px 20px 56px;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+    .hero::before {
+      content: '';
+      position: absolute; inset: 0;
+      background: radial-gradient(ellipse at 50% 0%, rgba(124,58,237,.18) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .hero h1 {
+      font-size: clamp(1.75rem, 4vw, 2.5rem);
+      font-weight: 700; letter-spacing: -.03em; color: #fff;
+      margin-bottom: 12px;
+    }
+    .hero h1 span { background: linear-gradient(135deg, #a78bfa, #60a5fa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .hero p { font-size: 1rem; color: var(--muted); margin-bottom: 48px; }
+
+    .pricing { max-width: 680px; margin: 0 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 0 16px; }
+    .plan {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 28px 24px;
+      transition: border-color .25s, transform .25s;
+      position: relative;
+    }
+    .plan:hover { border-color: rgba(124,58,237,.4); transform: translateY(-3px); }
+    .plan.featured {
+      border-color: rgba(124,58,237,.4);
+      background: linear-gradient(135deg, #14122a 0%, #1a1030 100%);
+    }
+    .plan-badge {
+      position: absolute; top: -12px; left: 50%; transform: translateX(-50%);
+      background: linear-gradient(90deg, #7c3aed, #3b82f6);
+      border-radius: 99px; color: #fff;
+      font-size: .6875rem; font-weight: 700;
+      padding: 4px 14px; letter-spacing: .05em; white-space: nowrap;
+    }
+    .plan-name { font-size: .875rem; font-weight: 600; color: var(--muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: .07em; }
+    .plan-price { font-size: 2.5rem; font-weight: 700; color: #fff; letter-spacing: -.03em; margin-bottom: 4px; }
+    .plan-price sup { font-size: 1.25rem; vertical-align: top; margin-top: 8px; display: inline-block; }
+    .plan-period { font-size: .8125rem; color: var(--muted); margin-bottom: 24px; }
+    .plan-perks { list-style: none; margin-bottom: 28px; display: flex; flex-direction: column; gap: 9px; }
+    .plan-perks li { display: flex; align-items: flex-start; gap: 8px; font-size: .875rem; color: var(--muted); }
+    .plan-perks li::before { content: '✓'; color: #22c55e; font-weight: 700; flex-shrink: 0; }
+
+    .btn-buy {
+      width: 100%; padding: 14px;
+      border-radius: 12px; border: none; cursor: pointer;
+      font-family: 'Inter', sans-serif; font-size: .9375rem; font-weight: 600;
+      transition: all .2s; display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    .btn-buy.primary { background: linear-gradient(135deg, #7c3aed, #3b82f6); color: #fff; }
+    .btn-buy.primary:hover { opacity: .9; transform: translateY(-1px); box-shadow: 0 8px 24px rgba(124,58,237,.3); }
+    .btn-buy.secondary { background: rgba(255,255,255,.07); color: #fff; border: 1px solid rgba(255,255,255,.1); }
+    .btn-buy.secondary:hover { background: rgba(255,255,255,.12); }
+    .btn-buy:disabled { opacity: .6; cursor: not-allowed; transform: none !important; }
+    .spinner { display: none; width: 16px; height: 16px; border: 2px solid rgba(255,255,255,.3); border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .error-banner { max-width: 680px; margin: 20px auto 0; padding: 0 16px; display: none; }
+    .error-banner.show { display: block; }
+    .error-inner { background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.2); border-radius: 12px; padding: 14px 18px; font-size: .875rem; color: #fca5a5; }
+
+    .secure-note { text-align: center; font-size: .75rem; color: rgba(255,255,255,.2); padding: 32px 16px 20px; }
+
+    @media (max-width: 520px) {
+      .pricing { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-logo">💸 Финансовый Трекер</div>
+  <a href="/logout" class="btn-logout">Выйти</a>
+</div>
+
+<div class="hero">
+  <h1>Выбери <span>тарифный план</span></h1>
+  <p>Один платёж — доступ к трекеру с любого устройства</p>
+
+  <div class="pricing">
+    <!-- MONTHLY -->
+    <div class="plan">
+      <div class="plan-name">Ежемесячно</div>
+      <div class="plan-price"><sup>€</sup>2<span style="font-size:1.5rem">.99</span></div>
+      <div class="plan-period">в месяц · отмена в любой момент</div>
+      <ul class="plan-perks">
+        <li>Все функции трекера</li>
+        <li>Синхронизация между устройствами</li>
+        <li>Автопродление ежемесячно</li>
+      </ul>
+      <button class="btn-buy secondary" onclick="checkout('monthly', this)">
+        <span class="spinner" id="spin-monthly"></span>
+        Подписаться
+      </button>
+    </div>
+
+    <!-- LIFETIME -->
+    <div class="plan featured">
+      <div class="plan-badge">ЛУЧШИЙ ВЫБОР</div>
+      <div class="plan-name">Разовый платёж</div>
+      <div class="plan-price"><sup>€</sup>9<span style="font-size:1.5rem">.99</span></div>
+      <div class="plan-period">один раз · навсегда</div>
+      <ul class="plan-perks">
+        <li>Все функции трекера</li>
+        <li>Синхронизация между устройствами</li>
+        <li>Все будущие обновления</li>
+      </ul>
+      <button class="btn-buy primary" onclick="checkout('lifetime', this)">
+        <span class="spinner" id="spin-lifetime"></span>
+        Купить доступ
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="error-banner" id="error-banner">
+  <div class="error-inner" id="error-text"></div>
+</div>
+
+<div class="secure-note">Оплата через Stripe · Данные карты не хранятся на нашем сервере</div>
+
+<script>
+  const params = new URLSearchParams(location.search);
+  if (params.get('error')) {
+    const b = document.getElementById('error-banner');
+    document.getElementById('error-text').textContent = 'Платёж не прошёл. Попробуй ещё раз.';
+    b.classList.add('show');
+  }
+
+  async function checkout(plan, btn) {
+    btn.disabled = true;
+    document.getElementById(`spin-${plan === 'monthly' ? 'monthly' : 'lifetime'}`).style.display = 'block';
+    try {
+      const res = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan })
+      });
+      const data = await res.json();
+      if (data.url) { window.location.href = data.url; return; }
+      throw new Error(data.error || 'Ошибка');
+    } catch (e) {
+      document.getElementById('error-text').textContent = `Ошибка: ${e.message}`;
+      document.getElementById('error-banner').classList.add('show');
+      btn.disabled = false;
+      document.getElementById(`spin-${plan === 'monthly' ? 'monthly' : 'lifetime'}`).style.display = 'none';
+    }
+  }
+</script>
+</body>
+</html>

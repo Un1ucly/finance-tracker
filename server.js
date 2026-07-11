@@ -1,117 +1,244 @@
 const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
+const bcrypt = require('bcrypt');
 const cookieParser = require('cookie-parser');
 const { Pool } = require('pg');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const SALT_ROUNDS = 10;
+const SESSION_DAYS = 30;
 
-// ── DB ──────────────────────────────────────────
+// ── DATABASE ─────────────────────────────────────
 let pool = null;
 if (process.env.DATABASE_URL) {
   pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
-  pool.query(`
-    CREATE TABLE IF NOT EXISTS tracker_state (
-      id INTEGER PRIMARY KEY DEFAULT 1,
-      data JSONB NOT NULL,
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS access_tokens (
-      token VARCHAR(64) PRIMARY KEY,
-      stripe_session_id VARCHAR(200) UNIQUE,
-      plan VARCHAR(20),
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      expires_at TIMESTAMPTZ,
-      active BOOLEAN DEFAULT TRUE
-    );
-  `).then(() => console.log('DB ready')).catch(e => console.error('DB init:', e.message));
+  initDB();
 }
 
-// ── STRIPE ──────────────────────────────────────
+async function initDB() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS sessions (
+        token VARCHAR(64) PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        expires_at TIMESTAMPTZ NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS access_tokens (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        stripe_session_id VARCHAR(200) UNIQUE,
+        plan VARCHAR(20),
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        expires_at TIMESTAMPTZ,
+        active BOOLEAN DEFAULT TRUE
+      );
+      CREATE TABLE IF NOT EXISTS tracker_state (
+        user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        data JSONB NOT NULL,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    console.log('DB ready');
+  } catch (e) {
+    console.error('DB init error:', e.message);
+  }
+}
+
+// ── STRIPE ───────────────────────────────────────
 let stripe = null;
 if (process.env.STRIPE_SECRET_KEY) {
   stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
   console.log('Stripe ready');
-} else {
-  console.warn('STRIPE_SECRET_KEY not set — payment wall disabled');
 }
 
-// ── WEBHOOK (raw body, must be before express.json) ──
+// ── WEBHOOK (raw body — must be before express.json) ──
 app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   if (!stripe) return res.sendStatus(400);
-
-  const sig = req.headers['stripe-signature'];
   let event;
   try {
-    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+    event = stripe.webhooks.constructEvent(req.body, req.headers['stripe-signature'], process.env.STRIPE_WEBHOOK_SECRET);
   } catch (e) {
-    console.error('Webhook signature error:', e.message);
     return res.sendStatus(400);
   }
 
   if (event.type === 'customer.subscription.deleted') {
     const sub = event.data.object;
-    if (pool) {
-      await pool.query(
-        'UPDATE access_tokens SET active = FALSE WHERE stripe_session_id = $1',
-        [sub.id]
-      ).catch(e => console.error('webhook DB error:', e.message));
-    }
+    await pool?.query('UPDATE access_tokens SET active = FALSE WHERE stripe_session_id = $1', [sub.id]).catch(() => {});
   }
-
   if (event.type === 'invoice.paid') {
     const inv = event.data.object;
-    if (pool && inv.subscription) {
-      const newExpiry = new Date(Date.now() + 35 * 24 * 60 * 60 * 1000); // +35 days buffer
-      await pool.query(
+    if (inv.subscription) {
+      const exp = new Date(Date.now() + 35 * 24 * 60 * 60 * 1000);
+      await pool?.query(
         'UPDATE access_tokens SET expires_at = $1, active = TRUE WHERE stripe_session_id = $2',
-        [newExpiry, inv.subscription]
-      ).catch(e => console.error('webhook DB error:', e.message));
+        [exp, inv.subscription]
+      ).catch(() => {});
     }
   }
 
   res.sendStatus(200);
 });
 
-// ── MIDDLEWARE ───────────────────────────────────
+// ── MIDDLEWARE ────────────────────────────────────
 app.use(cookieParser());
 app.use(express.json({ limit: '1mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), { index: false }));
 
-// ── AUTH HELPER ──────────────────────────────────
-async function isValidToken(token) {
-  if (!pool || !token) return false;
+// ── HELPERS ───────────────────────────────────────
+function view(file) {
+  return path.join(__dirname, 'views', file);
+}
+function protected_(file) {
+  return path.join(__dirname, 'protected', file);
+}
+
+async function getSession(token) {
+  if (!pool || !token) return null;
   try {
     const r = await pool.query(
-      'SELECT plan, expires_at FROM access_tokens WHERE token = $1 AND active = TRUE',
+      'SELECT user_id FROM sessions WHERE token = $1 AND expires_at > NOW()',
       [token]
     );
-    if (!r.rows.length) return false;
-    const { expires_at } = r.rows[0];
-    if (expires_at && new Date() > new Date(expires_at)) return false;
-    return true;
+    return r.rows[0] || null;
+  } catch { return null; }
+}
+
+async function hasAccess(userId) {
+  if (!stripe) return true; // no Stripe = open access
+  if (!pool || !userId) return false;
+  try {
+    const r = await pool.query(
+      `SELECT id FROM access_tokens
+       WHERE user_id = $1 AND active = TRUE
+       AND (expires_at IS NULL OR expires_at > NOW())`,
+      [userId]
+    );
+    return r.rows.length > 0;
   } catch { return false; }
 }
 
-// ── ROUTES ───────────────────────────────────────
+async function createSession(userId, res) {
+  const token = crypto.randomBytes(32).toString('hex');
+  const exp = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
+  await pool.query('INSERT INTO sessions (token, user_id, expires_at) VALUES ($1,$2,$3)', [token, userId, exp]);
+  res.cookie('session_token', token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: SESSION_DAYS * 24 * 60 * 60 * 1000
+  });
+}
 
-// Landing / Tracker (depends on auth state)
+async function requireAuth(req, res, next) {
+  const session = await getSession(req.cookies?.session_token);
+  if (!session) return res.redirect('/login');
+  req.userId = session.user_id;
+  next();
+}
+
+// ── PAGE ROUTES ───────────────────────────────────
+
+// Root: dispatch based on auth + access
 app.get('/', async (req, res) => {
-  // No Stripe configured → serve tracker directly (dev mode)
-  if (!stripe) {
-    return res.sendFile(path.join(__dirname, 'protected', 'tracker.html'));
+  const session = await getSession(req.cookies?.session_token);
+  if (!session) return res.redirect('/login');
+  if (await hasAccess(session.user_id)) {
+    return res.sendFile(protected_('tracker.html'));
   }
-  const token = req.cookies?.access_token;
-  if (token && await isValidToken(token)) {
-    return res.sendFile(path.join(__dirname, 'protected', 'tracker.html'));
-  }
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.redirect('/pricing');
 });
 
-// Create Stripe Checkout session
-app.post('/api/checkout', async (req, res) => {
-  if (!stripe) return res.status(400).json({ error: 'Stripe not configured' });
+// Login / Register page
+app.get('/login', async (req, res) => {
+  const session = await getSession(req.cookies?.session_token);
+  if (session) {
+    return (await hasAccess(session.user_id))
+      ? res.redirect('/')
+      : res.redirect('/pricing');
+  }
+  res.sendFile(view('login.html'));
+});
+
+// Pricing page (must be logged in, no access yet)
+app.get('/pricing', requireAuth, async (req, res) => {
+  if (await hasAccess(req.userId)) return res.redirect('/');
+  res.sendFile(view('pricing.html'));
+});
+
+// Logout
+app.get('/logout', async (req, res) => {
+  const token = req.cookies?.session_token;
+  if (token && pool) {
+    await pool.query('DELETE FROM sessions WHERE token = $1', [token]).catch(() => {});
+  }
+  res.clearCookie('session_token');
+  res.redirect('/login');
+});
+
+// ── AUTH API ──────────────────────────────────────
+
+app.post('/api/register', async (req, res) => {
+  const { email, password } = req.body || {};
+  if (!email?.trim() || !password) {
+    return res.status(400).json({ error: 'Введи email и пароль' });
+  }
+  if (password.length < 6) {
+    return res.status(400).json({ error: 'Пароль минимум 6 символов' });
+  }
+  if (!pool) return res.status(500).json({ error: 'БД не подключена' });
+
+  try {
+    const hash = await bcrypt.hash(password, SALT_ROUNDS);
+    const r = await pool.query(
+      'INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id',
+      [email.toLowerCase().trim(), hash]
+    );
+    await createSession(r.rows[0].id, res);
+    res.json({ ok: true });
+  } catch (e) {
+    if (e.code === '23505') return res.status(400).json({ error: 'Этот email уже зарегистрирован' });
+    console.error('register:', e.message);
+    res.status(500).json({ error: 'Ошибка сервера' });
+  }
+});
+
+app.post('/api/login', async (req, res) => {
+  const { email, password } = req.body || {};
+  if (!email?.trim() || !password) {
+    return res.status(400).json({ error: 'Введи email и пароль' });
+  }
+  if (!pool) return res.status(500).json({ error: 'БД не подключена' });
+
+  try {
+    const r = await pool.query(
+      'SELECT id, password_hash FROM users WHERE email = $1',
+      [email.toLowerCase().trim()]
+    );
+    if (!r.rows.length) return res.status(401).json({ error: 'Неверный email или пароль' });
+
+    const ok = await bcrypt.compare(password, r.rows[0].password_hash);
+    if (!ok) return res.status(401).json({ error: 'Неверный email или пароль' });
+
+    await createSession(r.rows[0].id, res);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('login:', e.message);
+    res.status(500).json({ error: 'Ошибка сервера' });
+  }
+});
+
+// ── STRIPE API ────────────────────────────────────
+
+app.post('/api/checkout', requireAuth, async (req, res) => {
+  if (!stripe) return res.status(400).json({ error: 'Stripe не настроен' });
 
   const { plan } = req.body;
   const priceId = plan === 'monthly'
@@ -119,102 +246,86 @@ app.post('/api/checkout', async (req, res) => {
     : process.env.STRIPE_PRICE_LIFETIME;
 
   if (!priceId) {
-    return res.status(400).json({ error: `Price ID not set (STRIPE_PRICE_${plan === 'monthly' ? 'MONTHLY' : 'LIFETIME'})` });
+    return res.status(400).json({ error: `Не задан STRIPE_PRICE_${plan === 'monthly' ? 'MONTHLY' : 'LIFETIME'}` });
   }
 
   const base = process.env.BASE_URL || `http://localhost:${PORT}`;
-
   try {
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       mode: plan === 'monthly' ? 'subscription' : 'payment',
       line_items: [{ price: priceId, quantity: 1 }],
       success_url: `${base}/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${base}/`,
+      cancel_url: `${base}/pricing`,
+      metadata: { user_id: String(req.userId) },
       allow_promotion_codes: true,
     });
     res.json({ url: session.url });
   } catch (e) {
-    console.error('Checkout error:', e.message);
+    console.error('checkout:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
 
-// Success redirect after payment
-app.get('/success', async (req, res) => {
+app.get('/success', requireAuth, async (req, res) => {
   if (!stripe) return res.redirect('/');
 
   const { session_id } = req.query;
-  if (!session_id) return res.redirect('/');
+  if (!session_id) return res.redirect('/pricing');
 
   try {
     const session = await stripe.checkout.sessions.retrieve(session_id);
+    const paid = session.payment_status === 'paid' || session.mode === 'subscription';
+    if (!paid) return res.redirect('/pricing?error=1');
 
-    const paid = session.payment_status === 'paid'
-      || session.mode === 'subscription';
-
-    if (!paid) return res.redirect('/?denied=1');
-
-    const token = crypto.randomBytes(32).toString('hex');
     const plan = session.mode === 'subscription' ? 'monthly' : 'lifetime';
     const subId = session.subscription || session_id;
-    const expiresAt = plan === 'monthly'
-      ? new Date(Date.now() + 35 * 24 * 60 * 60 * 1000)
-      : null;
+    const expiresAt = plan === 'monthly' ? new Date(Date.now() + 35 * 24 * 60 * 60 * 1000) : null;
 
     if (pool) {
       await pool.query(
-        `INSERT INTO access_tokens (token, stripe_session_id, plan, expires_at)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (stripe_session_id) DO NOTHING`,
-        [token, subId, plan, expiresAt]
+        `INSERT INTO access_tokens (user_id, stripe_session_id, plan, expires_at)
+         VALUES ($1, $2, $3, $4) ON CONFLICT (stripe_session_id) DO NOTHING`,
+        [req.userId, subId, plan, expiresAt]
       );
     }
-
-    res.cookie('access_token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 365 * 24 * 60 * 60 * 1000, // 1 year
-    });
     res.redirect('/');
   } catch (e) {
-    console.error('Success handler error:', e.message);
-    res.redirect('/?denied=1');
+    console.error('success:', e.message);
+    res.redirect('/pricing');
   }
 });
 
-// Tracker state API (no extra auth — cookie already checked at route level)
-app.get('/api/state', async (req, res) => {
+// ── TRACKER STATE API ─────────────────────────────
+
+app.get('/api/state', requireAuth, async (req, res) => {
   if (!pool) return res.json(null);
   try {
-    const r = await pool.query('SELECT data FROM tracker_state WHERE id = 1');
+    const r = await pool.query('SELECT data FROM tracker_state WHERE user_id = $1', [req.userId]);
     res.json(r.rows[0]?.data || null);
   } catch (e) {
-    console.error('GET /api/state:', e.message);
+    console.error('GET state:', e.message);
     res.status(500).json(null);
   }
 });
 
-app.post('/api/state', async (req, res) => {
+app.post('/api/state', requireAuth, async (req, res) => {
   if (!pool) return res.json({ ok: false });
   try {
     await pool.query(
-      `INSERT INTO tracker_state (id, data, updated_at)
-       VALUES (1, $1, NOW())
-       ON CONFLICT (id) DO UPDATE SET data = $1, updated_at = NOW()`,
-      [req.body]
+      `INSERT INTO tracker_state (user_id, data, updated_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (user_id) DO UPDATE SET data = $2, updated_at = NOW()`,
+      [req.userId, req.body]
     );
     res.json({ ok: true });
   } catch (e) {
-    console.error('POST /api/state:', e.message);
+    console.error('POST state:', e.message);
     res.status(500).json({ ok: false });
   }
 });
 
 // Fallback
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
+app.get('*', (req, res) => res.redirect('/'));
 
 app.listen(PORT, () => console.log(`Running on port ${PORT}`));
